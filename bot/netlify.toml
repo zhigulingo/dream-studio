@@ -1,7 +1,6 @@
 [build]
   command = "echo 'Bot setup complete'"
   functions = "functions"
-  publish = "dist"
 
 [[redirects]]
   from = "/bot/*"
