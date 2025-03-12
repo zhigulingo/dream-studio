@@ -1,0 +1,9 @@
+[build]
+  command = "echo 'Bot setup complete'"
+  functions = "functions"
+  publish = "dist"
+
+[[redirects]]
+  from = "/bot/*"
+  to = "/.netlify/functions/bot/:splat"
+  status = 200
