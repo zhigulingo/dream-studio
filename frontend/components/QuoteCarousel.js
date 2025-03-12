@@ -17,8 +17,23 @@ export default function QuoteCarousel() {
   }, []);
 
   return (
-    <div style={{ padding: '10px', textAlign: 'center', backgroundColor: '#f0f0f0', borderRadius: '8px', marginBottom: '20px' }}>
-      <p>{quotes[currentQuoteIndex]}</p>
+    <div
+      style={{
+        padding: '15px',
+        textAlign: 'center',
+        backgroundColor: '#ffffff',
+        borderRadius: '10px',
+        boxShadow: '0 2px 5px rgba(0, 0, 0, 0.1)',
+        marginBottom: '20px',
+        minHeight: '100px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center'
+      }}
+    >
+      <p style={{ fontStyle: 'italic', color: '#333', margin: 0 }}>
+        "{quotes[currentQuoteIndex]}"
+      </p>
     </div>
   );
 }
