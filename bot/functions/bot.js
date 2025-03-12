@@ -7,9 +7,20 @@ const { sendInvoice } = require('../src/payments');
 // Инициализация бота
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-// Команда /start
+// Команда 
 bot.start((ctx) => {
-  ctx.reply('🌙 *Добро пожаловать в Dream Analyzer!* Отправьте описание сна для анализа.');
+  ctx.reply('🌙 *Добро пожаловать в Dream Analyzer!*', {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          {
+            text: 'Открыть личный кабинет',
+            web_app: { url: 'https://sparkling-cupcake-940504.netlify.app' } // Замените на URL вашего Mini App после деплоя
+          }
+        ]
+      ]
+    }
+  });
 });
 
 // Обработка текстовых сообщений
