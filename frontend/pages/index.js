@@ -6,6 +6,13 @@ import AnalysisHistory from '../components/AnalysisHistory';
 export default function Home() {
   const { user } = useTelegram();
 
+  if (!window.Telegram) {
+    console.error('Telegram Web App SDK не загружен');
+  } else {
+    console.log('Telegram Web App SDK загружен', window.Telegram.WebApp);
+    console.log('Пользователь:', user);
+  }
+
   const getMaxItems = (subscriptionType) => {
     switch (subscriptionType) {
       case 'trial': return 1;
@@ -43,7 +50,7 @@ export default function Home() {
           </button>
         </>
       ) : (
-        <p>Загрузка данных пользователя...</p>
+        <p>Загрузка данных пользователя... Проверьте консоль для отладки.</p>
       )}
     </div>
   );
