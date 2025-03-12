@@ -15,7 +15,7 @@ bot.start((ctx) => {
         [
           {
             text: 'Открыть личный кабинет',
-            web_app: { url: 'tourmaline-eclair-9d40ea.netlify.app' } // Замените на URL вашего Mini App после деплоя
+            web_app: { url: 'https://tourmaline-eclair-9d40ea.netlify.app' } // Замените на URL вашего Mini App после деплоя
           }
         ]
       ]
