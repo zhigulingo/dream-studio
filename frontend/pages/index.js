@@ -29,7 +29,14 @@ export default function Home() {
         },
         (buttonId) => {
           if (buttonId === 'basic' || buttonId === 'premium') {
-            window.Telegram.WebApp.sendData(buttonId);
+            try {
+              window.Telegram.WebApp.sendData(buttonId);
+              alert(`Тариф ${buttonId} выбран и отправлен боту!`);
+            } catch (err) {
+              alert('Ошибка отправки тарифа: ' + err.message);
+            }
+          } else {
+            alert('Выбор тарифа отменен');
           }
         }
       );
