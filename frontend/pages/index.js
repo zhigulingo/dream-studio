@@ -4,7 +4,7 @@ import SubscriptionChecker from '../components/SubscriptionChecker';
 import AnalysisHistory from '../components/AnalysisHistory';
 
 export default function Home() {
-  const { user, isClient, error } = useTelegram();
+  const { user, isClient, error, debugInfo } = useTelegram();
 
   const getMaxItems = (subscriptionType) => {
     switch (subscriptionType) {
@@ -34,7 +34,7 @@ export default function Home() {
         }
       );
     } else {
-      console.error('Telegram Web App не доступен для показа поп-апа');
+      alert('Telegram Web App не доступен для показа поп-апа');
     }
   };
 
@@ -42,7 +42,7 @@ export default function Home() {
     return (
       <div style={{ fontFamily: 'Arial, sans-serif', padding: '20px', maxWidth: '600px', margin: '0 auto' }}>
         <h1>Добро пожаловать в Dream Analyzer</h1>
-        <p>Загрузка...</p>
+        <p>Инициализация...</p>
       </div>
     );
   }
@@ -51,7 +51,12 @@ export default function Home() {
     <div style={{ fontFamily: 'Arial, sans-serif', padding: '20px', maxWidth: '600px', margin: '0 auto' }}>
       <h1>Добро пожаловать в Dream Analyzer</h1>
       {error ? (
-        <p style={{ color: 'red' }}>Ошибка: {error}. Проверьте консоль для отладки.</p>
+        <>
+          <p style={{ color: 'red' }}>Ошибка: {error}</p>
+          <pre style={{ backgroundColor: '#f0f0f0', padding: '10px', borderRadius: '5px', whiteSpace: 'pre-wrap' }}>
+            {debugInfo}
+          </pre>
+        </>
       ) : user ? (
         <>
           <QuoteCarousel />
@@ -65,7 +70,12 @@ export default function Home() {
           </button>
         </>
       ) : (
-        <p>Загрузка данных пользователя... Проверьте консоль для отладки.</p>
+        <>
+          <p>Загрузка данных пользователя...</p>
+          <pre style={{ backgroundColor: '#f0f0f0', padding: '10px', borderRadius: '5px', whiteSpace: 'pre-wrap' }}>
+            {debugInfo}
+          </pre>
+        </>
       )}
     </div>
   );
