@@ -1,83 +1,82 @@
 const { Telegraf } = require('telegraf');
-const { validateDream, checkSubscription } = require('../src/utils');
-const { getUser, updateUserTokens, storeAnalysis } = require('../src/database');
-const { analyzeDream } = require('../src/gemini');
-const { sendInvoice } = require('../src/payments');
+const axios = require('axios');
+const { getUser, createUser, createAnalysis } = require('../src/database');
 
-// Инициализация бота
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-// Команда 
 bot.start((ctx) => {
   ctx.reply('🌙 *Добро пожаловать в Dream Analyzer!*', {
+    parse_mode: 'Markdown',
     reply_markup: {
       inline_keyboard: [
         [
           {
             text: 'Открыть личный кабинет',
-            web_app: { url: 'https://tourmaline-eclair-9d40ea.netlify.app' } // Замените на URL вашего Mini App после деплоя
-          }
-        ]
-      ]
-    }
+            web_app: { url: 'https://tourmaline-eclair-9d40ea.netlify.app' },
+          },
+        ],
+      ],
+    },
   });
 });
 
-// Обработка текстовых сообщений
 bot.on('text', async (ctx) => {
-  const text = ctx.message.text;
-  if (!validateDream(text)) {
-    ctx.reply('Ошибка: текст должен быть минимум 40 символов, содержать кириллицу и не состоять только из чисел или эмодзи.');
-    return;
+  const tgId = ctx.from.id;
+  const dreamText = ctx.message.text;
+
+  let user = await getUser(tgId);
+  if (!user) {
+    user = await createUser(tgId);
+    if (!user) {
+      return ctx.reply('Ошибка: не удалось создать пользователя. Попробуйте позже.');
+    }
   }
-  const isSubscribed = await checkSubscription(bot, ctx.from.id);
-  if (!isSubscribed) {
-    ctx.reply('Пожалуйста, подпишитесь на @TheDreamsHub для продолжения.');
-    return;
+
+  if (!user.tokens || user.tokens <= 0) {
+    return ctx.reply('У вас закончились токены. Пожалуйста, выберите тариф в личном кабинете.');
   }
-  const user = await getUser(ctx.from.id);
-  if (user.tokens <= 0) {
-    ctx.reply('У вас закончились токены. Выберите тариф: /buy_basic или /buy_premium');
-    return;
-  }
-  await updateUserTokens(user.id, user.tokens - 1);
+
   ctx.reply('Анализирую ваш сон...');
-  const analysis = await analyzeDream(text);
-  await storeAnalysis(user.id, text, analysis);
-  ctx.reply(`Анализ вашего сна: ${analysis}`);
-});
 
-// Команды для покупки тарифов
-bot.command('buy_basic', (ctx) => sendInvoice(bot, ctx, 'basic'));
-bot.command('buy_premium', (ctx) => sendInvoice(bot, ctx, 'premium'));
-
-// Обработка платежей
-bot.on('pre_checkout_query', (ctx) => ctx.answerPreCheckoutQuery(true));
-
-bot.on('successful_payment', async (ctx) => {
-  const tariff = ctx.message.successful_payment.invoice_payload;
-  const updates = {
-    basic: { tokens: 15, subscription_type: 'basic' },
-    premium: { tokens: 30, subscription_type: 'premium' },
-  };
-  const { error } = await supabase
-    .from('users')
-    .update(updates[tariff])
-    .eq('tg_id', ctx.from.id);
-  if (error) {
-    ctx.reply('Ошибка при обновлении тарифа');
-    return;
-  }
-  ctx.reply(`Спасибо за покупку тарифа ${tariff}!`);
-});
-
-// Экспорт функции для Netlify Functions
-exports.handler = async (event, context) => {
   try {
-    await bot.handleUpdate(JSON.parse(event.body));
+    const response = await axios.post('https://api.openai.com/v1/completions', {
+      model: 'text-davinci-003',
+      prompt: `Проанализируй сон: "${dreamText}". Объясни его значение.`,
+      max_tokens: 500,
+    }, {
+      headers: {
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+    });
+
+    const analysis = response.data.choices[0].text.trim();
+    const analysisRecord = await createAnalysis(user.id, dreamText, analysis);
+    if (!analysisRecord) {
+      return ctx.reply('Ошибка: не удалось сохранить анализ. Попробуйте позже.');
+    }
+
+    user.tokens -= 1;
+    const { error } = await supabase.from('users').update({ tokens: user.tokens }).eq('id', user.id);
+    if (error) {
+      console.error('Ошибка обновления токенов:', error);
+      return ctx.reply('Ошибка: не удалось обновить токены. Попробуйте позже.');
+    }
+
+    ctx.reply(`✨ *Анализ сна:*\n\n${analysis}`, { parse_mode: 'Markdown' });
+  } catch (err) {
+    console.error('Ошибка анализа сна:', err.message);
+    ctx.reply('Ошибка при анализе сна. Попробуйте позже.');
+  }
+});
+
+bot.launch();
+module.exports.handler = async (event) => {
+  try {
+    const body = JSON.parse(event.body);
+    await bot.handleUpdate(body);
     return { statusCode: 200, body: 'OK' };
-  } catch (error) {
-    console.error('Error handling update:', error);
+  } catch (err) {
+    console.error('Ошибка обработки обновления:', err);
     return { statusCode: 500, body: 'Error' };
   }
 };
