@@ -67,6 +67,71 @@ bot.on('text', async (ctx) => {
     console.error('Ошибка анализа сна:', err.message);
     ctx.reply('Ошибка при анализе сна. Попробуйте позже.');
   }
+}); bot.on('web_app_data', async (ctx) => {
+  const tariff = ctx.webAppData.data; // 'basic' или 'premium'
+  const tgId = ctx.from.id;
+
+  let user = await getUser(tgId);
+  if (!user) {
+    return ctx.reply('Ошибка: пользователь не найден.');
+  }
+
+  const prices = {
+    basic: { tokens: 15, stars: 30 },
+    premium: { tokens: 30, stars: 90 },
+  };
+
+  const selectedTariff = prices[tariff];
+  if (!selectedTariff) {
+    return ctx.reply('Ошибка: выбранный тариф недоступен.');
+  }
+
+  try {
+    await ctx.replyWithInvoice(
+      `Тариф ${tariff.charAt(0).toUpperCase() + tariff.slice(1)}`,
+      `Получите ${selectedTariff.tokens} токенов за ${selectedTariff.stars} Stars`,
+      JSON.stringify({ tariff, tgId }),
+      process.env.PAYMENT_PROVIDER_TOKEN,
+      'XTR',
+      [
+        { label: `Тариф ${tariff}`, amount: selectedTariff.stars },
+      ]
+    );
+  } catch (err) {
+    console.error('Ошибка отправки инвойса:', err);
+    ctx.reply('Ошибка при создании инвойса. Попробуйте позже.');
+  }
+});
+
+bot.on('pre_checkout_query', (ctx) => ctx.answerPreCheckoutQuery(true));
+
+bot.on('successful_payment', async (ctx) => {
+  const { tariff, tgId } = JSON.parse(ctx.message.successful_payment.invoice_payload);
+  const prices = {
+    basic: { tokens: 15 },
+    premium: { tokens: 30 },
+  };
+
+  const selectedTariff = prices[tariff];
+  if (!selectedTariff) {
+    return ctx.reply('Ошибка: тариф не найден.');
+  }
+
+  const user = await getUser(tgId);
+  if (!user) {
+    return ctx.reply('Ошибка: пользователь не найден.');
+  }
+
+  const { error } = await supabase
+    .from('users')
+    .update({ subscription_type: tariff, tokens: user.tokens + selectedTariff.tokens })
+    .eq('tg_id', tgId);
+  if (error) {
+    console.error('Ошибка обновления тарифа:', error);
+    return ctx.reply('Ошибка при обновлении тарифа. Попробуйте позже.');
+  }
+
+  ctx.reply(`Тариф ${tariff} успешно активирован! У вас теперь ${user.tokens + selectedTariff.tokens} токенов.`);
 });
 
 bot.launch();
