@@ -2,9 +2,15 @@ const { Telegraf } = require('telegraf');
 const axios = require('axios');
 const { getUser, createUser, createAnalysis } = require('../src/database');
 
+console.log('Инициализация бота...');
+console.log('BOT_TOKEN:', process.env.BOT_TOKEN ? 'Установлен' : 'Не установлен');
+
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
+console.log('Бот создан, настройка обработчиков...');
+
 bot.start((ctx) => {
+  console.log('Получена команда /start от:', ctx.from);
   ctx.reply('🌙 *Добро пожаловать в Dream Analyzer!*', {
     parse_mode: 'Markdown',
     reply_markup: {
@@ -105,6 +111,7 @@ bot.on('successful_payment', async (ctx) => {
 });
 
 bot.on('text', async (ctx) => {
+  console.log('Получено текстовое сообщение:', ctx.message.text, 'от:', ctx.from);
   const tgId = ctx.from.id;
   const dreamText = ctx.message.text;
 
@@ -153,7 +160,10 @@ bot.on('text', async (ctx) => {
   }
 });
 
+console.log('Запуск бота...');
 bot.launch();
+console.log('Бот запущен');
+
 module.exports.handler = async (event) => {
   try {
     const body = JSON.parse(event.body);
