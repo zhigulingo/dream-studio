@@ -4,6 +4,7 @@ const { getUser, createUser, createAnalysis } = require('../src/database');
 
 console.log('Инициализация бота...');
 console.log('BOT_TOKEN:', process.env.BOT_TOKEN ? 'Установлен' : 'Не установлен');
+console.log('GEMINI_API_KEY:', process.env.GEMINI_API_KEY ? 'Установлен' : 'Не установлен');
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
@@ -130,17 +131,31 @@ bot.on('text', async (ctx) => {
   ctx.reply('Анализирую ваш сон...');
 
   try {
-    const response = await axios.post('https://api.openai.com/v1/completions', {
-      model: 'text-davinci-003',
-      prompt: `Проанализируй сон: "${dreamText}". Объясни его значение.`,
-      max_tokens: 500,
-    }, {
-      headers: {
-        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+    const response = await axios.post(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        contents: [
+          {
+            parts: [
+              {
+                text: `Проанализируй сон: "${dreamText}". Объясни его значение на русском языке.`,
+              },
+            ],
+          },
+        ],
+        generationConfig: {
+          maxOutputTokens: 500,
+          temperature: 0.7,
+        },
       },
-    });
+      {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }
+    );
 
-    const analysis = response.data.choices[0].text.trim();
+    const analysis = response.data.candidates[0].content.parts[0].text.trim();
     const analysisRecord = await createAnalysis(user.id, dreamText, analysis);
     if (!analysisRecord) {
       return ctx.reply('Ошибка: не удалось сохранить анализ. Попробуйте позже.');
@@ -156,13 +171,12 @@ bot.on('text', async (ctx) => {
     ctx.reply(`✨ *Анализ сна:*\n\n${analysis}`, { parse_mode: 'Markdown' });
   } catch (err) {
     console.error('Ошибка анализа сна:', err.message);
+    if (err.response) {
+      console.error('Детали ошибки:', err.response.data);
+    }
     ctx.reply('Ошибка при анализе сна. Попробуйте позже.');
   }
 });
-
-console.log('Запуск бота...');
-bot.launch();
-console.log('Бот запущен');
 
 module.exports.handler = async (event) => {
   try {
