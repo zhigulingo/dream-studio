@@ -6,12 +6,18 @@ export default function SubscriptionChecker({ userId }) {
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    console.log('Запрос подписки для userId:', userId);
     axios.get(`https://sparkling-cupcake-940504.netlify.app/api/users/${userId}`)
       .then(response => {
+        console.log('Данные подписки получены:', response.data);
         setSubscription(response.data);
       })
       .catch(err => {
-        console.error('Ошибка получения подписки:', err);
+        console.error('Ошибка получения подписки:', err.message);
+        if (err.response) {
+          console.error('Ответ сервера:', err.response.data);
+          console.error('Статус:', err.response.status);
+        }
         setError('Не удалось загрузить информацию о подписке. Попробуйте позже.');
       });
   }, [userId]);
