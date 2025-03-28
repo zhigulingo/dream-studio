@@ -7,9 +7,8 @@ console.log('SUPABASE_KEY:', process.env.SUPABASE_KEY ? 'Установлен' :
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
-// Настройка CORS
 fastify.register(require('@fastify/cors'), {
-  origin: '*', // Разрешаем запросы от всех источников (для тестов)
+  origin: '*',
   methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 });
@@ -17,6 +16,7 @@ fastify.register(require('@fastify/cors'), {
 fastify.get('/users/:tgId', async (request, reply) => {
   const { tgId } = request.params;
   console.log(`Запрос данных пользователя с tgId: ${tgId}`);
+  console.log('Заголовки запроса:', request.headers);
   try {
     const { data, error } = await supabase
       .from('users')
@@ -39,6 +39,7 @@ fastify.get('/users/:tgId', async (request, reply) => {
 fastify.get('/users/:tgId/analyses', async (request, reply) => {
   const { tgId } = request.params;
   console.log(`Запрос анализов для tgId: ${tgId}`);
+  console.log('Заголовки запроса:', request.headers);
   try {
     const { data: user, error: userError } = await supabase
       .from('users')
