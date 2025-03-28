@@ -7,7 +7,13 @@ console.log('SUPABASE_KEY:', process.env.SUPABASE_KEY ? 'Установлен' :
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
-// Регистрируем маршруты без префикса /api, так как Netlify перенаправляет /api/* на /:splat
+// Настройка CORS
+fastify.register(require('@fastify/cors'), {
+  origin: '*', // Разрешаем запросы от всех источников (для тестов)
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+});
+
 fastify.get('/users/:tgId', async (request, reply) => {
   const { tgId } = request.params;
   console.log(`Запрос данных пользователя с tgId: ${tgId}`);
@@ -76,7 +82,6 @@ fastify.get('/users/:tgId/analyses', async (request, reply) => {
 
 exports.handler = async (event, context) => {
   const { httpMethod, path, queryStringParameters, body } = event;
-  // Удаляем префикс /api из пути, так как Netlify перенаправляет /api/* на /:splat
   const adjustedPath = path.replace(/^\/api/, '');
   console.log('Обработка запроса:', httpMethod, adjustedPath);
   const response = await fastify.inject({
