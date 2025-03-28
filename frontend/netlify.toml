@@ -1,8 +1,13 @@
 [build]
-  command = "npm run build"
-  publish = "out"
+  command = "echo 'Bot and Backend setup complete'"
+  functions = "functions"
 
 [[redirects]]
-  from = "/*"
-  to = "/index.html"
+  from = "/bot/*"
+  to = "/.netlify/functions/bot/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
   status = 200
