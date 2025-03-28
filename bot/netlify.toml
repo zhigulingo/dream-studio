@@ -1,13 +1,13 @@
 [build]
-command = "echo 'Bot and Backend setup complete'"
-functions = "functions"
+  command = "node setWebhook.js && echo 'Bot and Backend setup complete'"
+  functions = "functions"
 
 [[redirects]]
-from = "/bot/*"
-to = "/.netlify/functions/bot/:splat"
-status = 200
+  from = "/bot/*"
+  to = "/.netlify/functions/bot/:splat"
+  status = 200
 
 [[redirects]]
-from = "/api/*"
-to = "/.netlify/functions/api/:splat"
-status = 200
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
