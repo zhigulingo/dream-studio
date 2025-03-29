@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
 
 export default function AnalysisHistory({ userId, maxItems }) {
   const [analyses, setAnalyses] = useState([]);
@@ -12,25 +11,21 @@ export default function AnalysisHistory({ userId, maxItems }) {
     };
 
     log(`Запрос истории анализов для userId: ${userId}`);
-    axios.get(`https://sparkling-cupcake-940504.netlify.app/api/users/${userId}/analyses`, {
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      },
-      timeout: 10000,
-    })
-      .then(response => {
-        log('Данные анализов получены: ' + JSON.stringify(response.data));
-        setAnalyses(response.data.slice(0, maxItems));
-      })
-      .catch(err => {
-        log('Ошибка получения анализов: ' + err.message);
-        if (err.response) {
-          log('Ответ сервера: ' + JSON.stringify(err.response.data));
-          log('Статус: ' + err.response.status);
-        }
-        setError('Не удалось загрузить историю анализов. Попробуйте позже.');
-      });
+    if (typeof window !== 'undefined' && window.Telegram?.WebApp) {
+      try {
+        window.Telegram.WebApp.sendData('/get_analyses');
+        log('Команда /get_analyses отправлена боту');
+        setTimeout(() => {
+          setError('Проверьте чат с ботом для получения истории анализов.');
+        }, 2000);
+      } catch (err) {
+        log('Ошибка отправки команды: ' + err.message);
+        setError('Не удалось запросить историю анализов. Попробуйте позже.');
+      }
+    } else {
+      log('Telegram Web App не доступен');
+      setError('Telegram Web App не доступен.');
+    }
   }, [userId, maxItems]);
 
   return (
