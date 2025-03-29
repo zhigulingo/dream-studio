@@ -3,30 +3,63 @@ import axios from 'axios';
 
 export default function AnalysisHistory({ userId, maxItems }) {
   const [analyses, setAnalyses] = useState([]);
+  const [error, setError] = useState(null);
+  const [debugLog, setDebugLog] = useState('');
 
   useEffect(() => {
-    if (userId) {
-      axios.get(`https://sparkling-cupcake-940504.netlify.app/api/users/${userId}/analyses`)
-        .then(response => setAnalyses(response.data.slice(0, maxItems)))
-        .catch(error => console.error('Error fetching analyses:', error));
-    }
+    const log = (message) => {
+      setDebugLog((prev) => prev + message + '\n');
+    };
+
+    log(`Запрос истории анализов для userId: ${userId}`);
+    axios.get(`https://sparkling-cupcake-940504.netlify.app/api/users/${userId}/analyses`, {
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      timeout: 10000,
+    })
+      .then(response => {
+        log('Данные анализов получены: ' + JSON.stringify(response.data));
+        setAnalyses(response.data.slice(0, maxItems));
+      })
+      .catch(err => {
+        log('Ошибка получения анализов: ' + err.message);
+        if (err.response) {
+          log('Ответ сервера: ' + JSON.stringify(err.response.data));
+          log('Статус: ' + err.response.status);
+        }
+        setError('Не удалось загрузить историю анализов. Попробуйте позже.');
+      });
   }, [userId, maxItems]);
 
   return (
-    <div style={{ padding: '10px' }}>
-      <h3>История анализов</h3>
-      {analyses.length > 0 ? (
-        <ul>
-          {analyses.map(analysis => (
-            <li key={analysis.id} style={{ marginBottom: '10px', borderBottom: '1px solid #ccc', paddingBottom: '5px' }}>
-              <p><strong>Сон:</strong> {analysis.dream_text}</p>
-              <p><strong>Анализ:</strong> {analysis.analysis}</p>
-              <p><small>{new Date(analysis.created_at).toLocaleString()}</small></p>
-            </li>
-          ))}
-        </ul>
+    <div style={{ padding: '15px', backgroundColor: '#ffffff', borderRadius: '10px', boxShadow: '0 2px 5px rgba(0, 0, 0, 0.1)', marginBottom: '20px' }}>
+      <h3 style={{ margin: '0 0 10px 0' }}>История анализов</h3>
+      {error ? (
+        <>
+          <p style={{ color: 'red' }}>{error}</p>
+          <pre style={{ backgroundColor: '#f0f0f0', padding: '10px', borderRadius: '5px', whiteSpace: 'pre-wrap' }}>
+            {debugLog}
+          </pre>
+        </>
+      ) : analyses.length === 0 ? (
+        <>
+          <p>История анализов пуста.</p>
+          <pre style={{ backgroundColor: '#f0f0f0', padding: '10px', borderRadius: '5px', whiteSpace: 'pre-wrap' }}>
+            {debugLog}
+          </pre>
+        </>
       ) : (
-        <p>История анализов пуста.</p>
+        analyses.map((analysis, index) => (
+          <div key={index} style={{ marginBottom: '15px', paddingBottom: '10px', borderBottom: '1px solid #eee' }}>
+            <p style={{ margin: '0 0 5px 0', fontWeight: 'bold' }}>Сон: {analysis.dream_text}</p>
+            <p style={{ margin: '0 0 5px 0' }}>Анализ: {analysis.analysis}</p>
+            <p style={{ margin: 0, color: '#666', fontSize: '0.9em' }}>
+              Дата: {new Date(analysis.created_at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })}
+            </p>
+          </div>
+        ))
       )}
     </div>
   );
