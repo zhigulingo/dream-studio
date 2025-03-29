@@ -45,8 +45,8 @@ bot.on('web_app_data', async (ctx) => {
   }
 
   const prices = {
-    basic: { tokens: 15, stars: 30 },
-    premium: { tokens: 30, stars: 90 },
+    basic: { tokens: 15, stars: 1 }, // Обновлено: 1 Star
+    premium: { tokens: 30, stars: 1 }, // Обновлено: 1 Star
   };
 
   const selectedTariff = prices[tariff];
@@ -131,6 +131,7 @@ bot.on('text', async (ctx) => {
   ctx.reply('Анализирую ваш сон...');
 
   try {
+    console.log('Отправка запроса к Gemini API...');
     const response = await axios.post(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
@@ -155,12 +156,17 @@ bot.on('text', async (ctx) => {
       }
     );
 
+    console.log('Ответ от Gemini API:', response.data);
     const analysis = response.data.candidates[0].content.parts[0].text.trim();
+
+    console.log('Сохранение анализа в Supabase...');
     const analysisRecord = await createAnalysis(user.id, dreamText, analysis);
     if (!analysisRecord) {
+      console.error('Не удалось сохранить анализ в Supabase');
       return ctx.reply('Ошибка: не удалось сохранить анализ. Попробуйте позже.');
     }
 
+    console.log('Обновление токенов пользователя...');
     user.tokens -= 1;
     const { error } = await supabase.from('users').update({ tokens: user.tokens }).eq('id', user.id);
     if (error) {
