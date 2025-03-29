@@ -1,6 +1,13 @@
 const { Telegraf } = require('telegraf');
 const axios = require('axios');
+const { createClient } = require('@supabase/supabase-js');
 const { getUser, createUser, createAnalysis } = require('../src/database');
+
+console.log('Инициализация Supabase...');
+console.log('SUPABASE_URL:', process.env.SUPABASE_URL);
+console.log('SUPABASE_KEY:', process.env.SUPABASE_KEY ? 'Установлен' : 'Не установлен');
+
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 console.log('Инициализация бота...');
 console.log('BOT_TOKEN:', process.env.BOT_TOKEN ? 'Установлен' : 'Не установлен');
@@ -45,8 +52,8 @@ bot.on('web_app_data', async (ctx) => {
   }
 
   const prices = {
-    basic: { tokens: 15, stars: 1 }, // Обновлено: 1 Star
-    premium: { tokens: 30, stars: 1 }, // Обновлено: 1 Star
+    basic: { tokens: 15, stars: 1 },
+    premium: { tokens: 30, stars: 1 },
   };
 
   const selectedTariff = prices[tariff];
