@@ -34,114 +34,50 @@ bot.start((ctx) => {
   });
 });
 
-bot.command('get_subscription', async (ctx) => {
-  const tgId = ctx.from.id;
-  console.log(`Получена команда /get_subscription от tgId: ${tgId}`);
-
-  const user = await getUser(tgId);
-  if (!user) {
-    return ctx.reply('Ошибка: пользователь не найден.');
-  }
-
-  ctx.reply(`Ваш тариф: ${user.subscription_type}\nОсталось токенов: ${user.tokens}`, {
-    parse_mode: 'Markdown',
-  });
-});
-
-bot.command('get_analyses', async (ctx) => {
-  const tgId = ctx.from.id;
-  console.log(`Получена команда /get_analyses от tgId: ${tgId}`);
-
-  const user = await getUser(tgId);
-  if (!user) {
-    return ctx.reply('Ошибка: пользователь не найден.');
-  }
-
-  let query = supabase
-    .from('analyses')
-    .select('*')
-    .eq('user_id', user.id)
-    .order('created_at', { ascending: false });
-
-  if (user.subscription_type === 'trial') {
-    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    query = query.gt('created_at', twentyFourHoursAgo);
-  } else if (user.subscription_type === 'basic') {
-    query = query.limit(3);
-  } else if (user.subscription_type === 'premium') {
-    query = query.limit(5);
-  }
-
-  const { data, error } = await query;
-  if (error) {
-    console.error('Ошибка получения анализов:', error);
-    return ctx.reply('Ошибка: не удалось получить анализы.');
-  }
-
-  if (data.length === 0) {
-    return ctx.reply('История анализов пуста.');
-  }
-
-  let response = '📜 *История анализов:*\n\n';
-  data.forEach((analysis, index) => {
-    response += `*Сон ${index + 1}:* ${analysis.dream_text}\n`;
-    response += `*Анализ:* ${analysis.analysis}\n`;
-    response += `*Дата:* ${new Date(analysis.created_at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })}\n\n`;
-  });
-
-  ctx.reply(response, { parse_mode: 'Markdown' });
-});
-
 bot.on('web_app_data', async (ctx) => {
   console.log('Получены данные от Mini App:', ctx.webAppData);
-  const data = ctx.webAppData.data; // 'basic', 'premium', '/get_subscription', '/get_analyses'
+  const data = ctx.webAppData.data; // 'basic' или 'premium'
   const tgId = ctx.from.id;
 
   console.log(`Получены данные: ${data}, tgId: ${tgId}`);
 
-  if (data === 'basic' || data === 'premium') {
-    let user = await getUser(tgId);
+  let user = await getUser(tgId);
+  if (!user) {
+    console.log('Пользователь не найден, создаем нового...');
+    user = await createUser(tgId);
     if (!user) {
-      console.log('Пользователь не найден, создаем нового...');
-      user = await createUser(tgId);
-      if (!user) {
-        console.log('Не удалось создать пользователя');
-        return ctx.reply('Ошибка: пользователь не найден и не удалось создать нового.');
-      }
+      console.log('Не удалось создать пользователя');
+      return ctx.reply('Ошибка: пользователь не найден и не удалось создать нового.');
     }
+  }
 
-    const prices = {
-      basic: { tokens: 15, stars: 1 },
-      premium: { tokens: 30, stars: 1 },
-    };
+  const prices = {
+    basic: { tokens: 15, stars: 1 },
+    premium: { tokens: 30, stars: 1 },
+  };
 
-    const selectedTariff = prices[data];
-    if (!selectedTariff) {
-      console.log('Недопустимый тариф:', data);
-      return ctx.reply('Ошибка: выбранный тариф недоступен.');
-    }
+  const selectedTariff = prices[data];
+  if (!selectedTariff) {
+    console.log('Недопустимый тариф:', data);
+    return ctx.reply('Ошибка: выбранный тариф недоступен.');
+  }
 
-    try {
-      console.log('Отправка инвойса...');
-      await ctx.replyWithInvoice(
-        `Тариф ${data.charAt(0).toUpperCase() + data.slice(1)}`,
-        `Получите ${selectedTariff.tokens} токенов за ${selectedTariff.stars} Stars`,
-        JSON.stringify({ tariff: data, tgId }),
-        process.env.PAYMENT_PROVIDER_TOKEN,
-        'XTR',
-        [
-          { label: `Тариф ${data}`, amount: selectedTariff.stars },
-        ]
-      );
-      console.log('Инвойс отправлен');
-    } catch (err) {
-      console.error('Ошибка отправки инвойса:', err);
-      ctx.reply('Ошибка при создании инвойса. Попробуйте позже.');
-    }
-  } else if (data === '/get_subscription' || data === '/get_analyses') {
-    // Перенаправляем на обработку команд
-    ctx.message = { text: data, from: ctx.from };
-    bot.handleUpdate({ update_id: ctx.update.update_id, message: ctx.message });
+  try {
+    console.log('Отправка инвойса...');
+    await ctx.replyWithInvoice(
+      `Тариф ${data.charAt(0).toUpperCase() + data.slice(1)}`,
+      `Получите ${selectedTariff.tokens} токенов за ${selectedTariff.stars} Stars`,
+      JSON.stringify({ tariff: data, tgId }),
+      process.env.PAYMENT_PROVIDER_TOKEN,
+      'XTR',
+      [
+        { label: `Тариф ${data}`, amount: selectedTariff.stars },
+      ]
+    );
+    console.log('Инвойс отправлен');
+  } catch (err) {
+    console.error('Ошибка отправки инвойса:', err.message);
+    ctx.reply('Ошибка при создании инвойса. Попробуйте позже.');
   }
 });
 
@@ -170,16 +106,21 @@ bot.on('successful_payment', async (ctx) => {
     return ctx.reply('Ошибка: пользователь не найден.');
   }
 
-  const { error } = await supabase
-    .from('users')
-    .update({ subscription_type: tariff, tokens: user.tokens + selectedTariff.tokens })
-    .eq('tg_id', tgId);
-  if (error) {
-    console.error('Ошибка обновления тарифа:', error);
-    return ctx.reply('Ошибка при обновлении тарифа. Попробуйте позже.');
-  }
+  try {
+    const { error } = await supabase
+      .from('users')
+      .update({ subscription_type: tariff, tokens: user.tokens + selectedTariff.tokens })
+      .eq('tg_id', tgId);
+    if (error) {
+      console.error('Ошибка обновления тарифа:', error.message);
+      return ctx.reply('Ошибка при обновлении тарифа. Попробуйте позже.');
+    }
 
-  ctx.reply(`Тариф ${tariff} успешно активирован! У вас теперь ${user.tokens + selectedTariff.tokens} токенов.`);
+    ctx.reply(`Тариф ${tariff} успешно активирован! У вас теперь ${user.tokens + selectedTariff.tokens} токенов.`);
+  } catch (err) {
+    console.error('Ошибка при обработке оплаты:', err.message);
+    ctx.reply('Ошибка при обработке оплаты. Попробуйте позже.');
+  }
 });
 
 bot.on('text', async (ctx) => {
@@ -187,9 +128,8 @@ bot.on('text', async (ctx) => {
   const tgId = ctx.from.id;
   const dreamText = ctx.message.text;
 
-  // Проверяем, является ли текст командой
   if (dreamText.startsWith('/')) {
-    return; // Команды обрабатываются отдельно
+    return; // Пропускаем команды
   }
 
   let user = await getUser(tgId);
@@ -204,9 +144,9 @@ bot.on('text', async (ctx) => {
     return ctx.reply('У вас закончились токены. Пожалуйста, выберите тариф в личном кабинете.');
   }
 
-  ctx.reply('Анализирую ваш сон...');
-
   try {
+    await ctx.reply('Анализирую ваш сон...');
+
     console.log('Отправка запроса к Gemini API...');
     const response = await axios.post(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
@@ -221,7 +161,7 @@ bot.on('text', async (ctx) => {
           },
         ],
         generationConfig: {
-          maxOutputTokens: 500,
+          maxOutputTokens: 400, // Уменьшаем лимит, чтобы избежать MAX_TOKENS
           temperature: 0.7,
         },
       },
@@ -229,34 +169,43 @@ bot.on('text', async (ctx) => {
         headers: {
           'Content-Type': 'application/json',
         },
+        timeout: 5000, // Таймаут 5 секунд
       }
     );
 
     console.log('Ответ от Gemini API:', response.data);
-    const analysis = response.data.candidates[0].content.parts[0].text.trim();
+    if (!response.data.candidates || !response.data.candidates[0].content.parts[0].text) {
+      throw new Error('Некорректный ответ от Gemini API');
+    }
+
+    let analysis = response.data.candidates[0].content.parts[0].text.trim();
+    if (response.data.candidates[0].finishReason === 'MAX_TOKENS') {
+      analysis += '\n\n(Анализ обрезан из-за ограничения длины. Попробуйте описать сон короче.)';
+    }
 
     console.log('Сохранение анализа в Supabase...');
     const analysisRecord = await createAnalysis(user.id, dreamText, analysis);
     if (!analysisRecord) {
-      console.error('Не удалось сохранить анализ в Supabase');
-      return ctx.reply('Ошибка: не удалось сохранить анализ. Попробуйте позже.');
+      throw new Error('Не удалось сохранить анализ в Supabase');
     }
 
     console.log('Обновление токенов пользователя...');
-    user.tokens -= 1;
-    const { error } = await supabase.from('users').update({ tokens: user.tokens }).eq('id', user.id);
+    const { error } = await supabase
+      .from('users')
+      .update({ tokens: user.tokens - 1 })
+      .eq('id', user.id);
     if (error) {
-      console.error('Ошибка обновления токенов:', error);
-      return ctx.reply('Ошибка: не удалось обновить токены. Попробуйте позже.');
+      throw new Error('Ошибка обновления токенов: ' + error.message);
     }
 
-    ctx.reply(`✨ *Анализ сна:*\n\n${analysis}`, { parse_mode: 'Markdown' });
+    console.log('Отправка ответа пользователю...');
+    await ctx.reply(`✨ *Анализ сна:*\n\n${analysis}`, { parse_mode: 'Markdown' });
   } catch (err) {
     console.error('Ошибка анализа сна:', err.message);
     if (err.response) {
-      console.error('Детали ошибки:', err.response.data);
+      console.error('Детали ошибки Gemini API:', err.response.data);
     }
-    ctx.reply('Ошибка при анализе сна. Попробуйте позже.');
+    await ctx.reply('Ошибка при анализе сна. Попробуйте позже.');
   }
 });
 
@@ -267,7 +216,7 @@ module.exports.handler = async (event) => {
     await bot.handleUpdate(body);
     return { statusCode: 200, body: 'OK' };
   } catch (err) {
-    console.error('Ошибка обработки обновления:', err);
+    console.error('Ошибка обработки обновления:', err.message);
     return { statusCode: 500, body: 'Error' };
   }
 };
