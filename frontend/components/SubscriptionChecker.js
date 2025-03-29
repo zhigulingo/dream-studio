@@ -12,17 +12,35 @@ export default function SubscriptionChecker({ userId }) {
 
     log(`Запрос подписки для userId: ${userId}`);
     if (typeof window !== 'undefined' && window.Telegram?.WebApp) {
-      try {
-        window.Telegram.WebApp.sendData('/get_subscription');
-        log('Команда /get_subscription отправлена боту');
-        // Мы не можем напрямую получить ответ от бота, поэтому пользователь увидит его в чате
-        setTimeout(() => {
-          setError('Проверьте чат с ботом для получения информации о подписке.');
-        }, 2000);
-      } catch (err) {
-        log('Ошибка отправки команды: ' + err.message);
-        setError('Не удалось запросить информацию о подписке. Попробуйте позже.');
-      }
+      const query = `fetch:/users/${userId}`;
+      log(`Отправка запроса: ${query}`);
+
+      window.Telegram.WebApp.sendData(query);
+
+      const handler = (event) => {
+        log('Получено событие от Telegram: ' + JSON.stringify(event));
+        if (event.data) {
+          try {
+            const response = JSON.parse(event.data);
+            if (response.error) {
+              log('Ошибка от бота: ' + response.error);
+              setError('Не удалось загрузить информацию о подписке: ' + response.error);
+            } else {
+              log('Данные подписки получены: ' + JSON.stringify(response));
+              setSubscription(response);
+            }
+          } catch (err) {
+            log('Ошибка парсинга ответа: ' + err.message);
+            setError('Ошибка обработки данных о подписке.');
+          }
+        }
+      };
+
+      window.Telegram.WebApp.onEvent('web_app_data', handler);
+
+      return () => {
+        window.Telegram.WebApp.offEvent('web_app_data', handler);
+      };
     } else {
       log('Telegram Web App не доступен');
       setError('Telegram Web App не доступен.');
@@ -38,17 +56,17 @@ export default function SubscriptionChecker({ userId }) {
             {debugLog}
           </pre>
         </>
-      ) : subscription ? (
-        <>
-          <h3 style={{ margin: '0 0 10px 0' }}>Ваш тариф: {subscription.subscription_type}</h3>
-          <p style={{ margin: 0 }}>Осталось токенов: {subscription.tokens}</p>
-        </>
-      ) : (
+      ) : !subscription ? (
         <>
           <p>Проверка подписки...</p>
           <pre style={{ backgroundColor: '#f0f0f0', padding: '10px', borderRadius: '5px', whiteSpace: 'pre-wrap' }}>
             {debugLog}
           </pre>
+        </>
+      ) : (
+        <>
+          <h3 style={{ margin: '0 0 10px 0' }}>Ваш тариф: {subscription.subscription_type}</h3>
+          <p style={{ margin: 0 }}>Осталось токенов: {subscription.tokens}</p>
         </>
       )}
     </div>
