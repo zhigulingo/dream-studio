@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
 
 export default function SubscriptionChecker({ userId }) {
   const [subscription, setSubscription] = useState(null);
@@ -12,25 +11,22 @@ export default function SubscriptionChecker({ userId }) {
     };
 
     log(`Запрос подписки для userId: ${userId}`);
-    axios.get(`https://sparkling-cupcake-940504.netlify.app/api/users/${userId}`, {
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      },
-      timeout: 10000, // Увеличиваем таймаут до 10 секунд
-    })
-      .then(response => {
-        log('Данные подписки получены: ' + JSON.stringify(response.data));
-        setSubscription(response.data);
-      })
-      .catch(err => {
-        log('Ошибка получения подписки: ' + err.message);
-        if (err.response) {
-          log('Ответ сервера: ' + JSON.stringify(err.response.data));
-          log('Статус: ' + err.response.status);
-        }
-        setError('Не удалось загрузить информацию о подписке. Попробуйте позже.');
-      });
+    if (typeof window !== 'undefined' && window.Telegram?.WebApp) {
+      try {
+        window.Telegram.WebApp.sendData('/get_subscription');
+        log('Команда /get_subscription отправлена боту');
+        // Мы не можем напрямую получить ответ от бота, поэтому пользователь увидит его в чате
+        setTimeout(() => {
+          setError('Проверьте чат с ботом для получения информации о подписке.');
+        }, 2000);
+      } catch (err) {
+        log('Ошибка отправки команды: ' + err.message);
+        setError('Не удалось запросить информацию о подписке. Попробуйте позже.');
+      }
+    } else {
+      log('Telegram Web App не доступен');
+      setError('Telegram Web App не доступен.');
+    }
   }, [userId]);
 
   return (
@@ -42,17 +38,17 @@ export default function SubscriptionChecker({ userId }) {
             {debugLog}
           </pre>
         </>
-      ) : !subscription ? (
+      ) : subscription ? (
+        <>
+          <h3 style={{ margin: '0 0 10px 0' }}>Ваш тариф: {subscription.subscription_type}</h3>
+          <p style={{ margin: 0 }}>Осталось токенов: {subscription.tokens}</p>
+        </>
+      ) : (
         <>
           <p>Проверка подписки...</p>
           <pre style={{ backgroundColor: '#f0f0f0', padding: '10px', borderRadius: '5px', whiteSpace: 'pre-wrap' }}>
             {debugLog}
           </pre>
-        </>
-      ) : (
-        <>
-          <h3 style={{ margin: '0 0 10px 0' }}>Ваш тариф: {subscription.subscription_type}</h3>
-          <p style={{ margin: 0 }}>Осталось токенов: {subscription.tokens}</p>
         </>
       )}
     </div>
