@@ -36,48 +36,117 @@ bot.start((ctx) => {
 
 bot.on('web_app_data', async (ctx) => {
   console.log('Получены данные от Mini App:', ctx.webAppData);
-  const data = ctx.webAppData.data; // 'basic' или 'premium'
+  const data = ctx.webAppData.data;
   const tgId = ctx.from.id;
 
   console.log(`Получены данные: ${data}, tgId: ${tgId}`);
 
-  let user = await getUser(tgId);
-  if (!user) {
-    console.log('Пользователь не найден, создаем нового...');
-    user = await createUser(tgId);
+  if (data === 'basic' || data === 'premium') {
+    let user = await getUser(tgId);
     if (!user) {
-      console.log('Не удалось создать пользователя');
-      return ctx.reply('Ошибка: пользователь не найден и не удалось создать нового.');
+      console.log('Пользователь не найден, создаем нового...');
+      user = await createUser(tgId);
+      if (!user) {
+        console.log('Не удалось создать пользователя');
+        return ctx.reply('Ошибка: пользователь не найден и не удалось создать нового.');
+      }
     }
-  }
 
-  const prices = {
-    basic: { tokens: 15, stars: 1 },
-    premium: { tokens: 30, stars: 1 },
-  };
+    const prices = {
+      basic: { tokens: 15, stars: 1 },
+      premium: { tokens: 30, stars: 1 },
+    };
 
-  const selectedTariff = prices[data];
-  if (!selectedTariff) {
-    console.log('Недопустимый тариф:', data);
-    return ctx.reply('Ошибка: выбранный тариф недоступен.');
-  }
+    const selectedTariff = prices[data];
+    if (!selectedTariff) {
+      console.log('Недопустимый тариф:', data);
+      return ctx.reply('Ошибка: выбранный тариф недоступен.');
+    }
 
-  try {
-    console.log('Отправка инвойса...');
-    await ctx.replyWithInvoice(
-      `Тариф ${data.charAt(0).toUpperCase() + data.slice(1)}`,
-      `Получите ${selectedTariff.tokens} токенов за ${selectedTariff.stars} Stars`,
-      JSON.stringify({ tariff: data, tgId }),
-      process.env.PAYMENT_PROVIDER_TOKEN,
-      'XTR',
-      [
-        { label: `Тариф ${data}`, amount: selectedTariff.stars },
-      ]
-    );
-    console.log('Инвойс отправлен');
-  } catch (err) {
-    console.error('Ошибка отправки инвойса:', err.message);
-    ctx.reply('Ошибка при создании инвойса. Попробуйте позже.');
+    try {
+      console.log('Отправка инвойса...');
+      await ctx.replyWithInvoice(
+        `Тариф ${data.charAt(0).toUpperCase() + data.slice(1)}`,
+        `Получите ${selectedTariff.tokens} токенов за ${selectedTariff.stars} Stars`,
+        JSON.stringify({ tariff: data, tgId }),
+        process.env.PAYMENT_PROVIDER_TOKEN,
+        'XTR',
+        [
+          { label: `Тариф ${data}`, amount: selectedTariff.stars },
+        ]
+      );
+      console.log('Инвойс отправлен');
+    } catch (err) {
+      console.error('Ошибка отправки инвойса:', err.message);
+      ctx.reply('Ошибка при создании инвойса. Попробуйте позже.');
+    }
+  } else if (data.startsWith('fetch:')) {
+    // Обработка запросов от Mini App
+    const query = data.replace('fetch:', '');
+    let responseData;
+
+    try {
+      if (query === `/users/${tgId}`) {
+        const user = await getUser(tgId);
+        if (!user) {
+          throw new Error('Пользователь не найден');
+        }
+        responseData = user;
+      } else if (query === `/users/${tgId}/analyses`) {
+        const user = await getUser(tgId);
+        if (!user) {
+          throw new Error('Пользователь не найден');
+        }
+        let queryBuilder = supabase
+          .from('analyses')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false });
+
+        if (user.subscription_type === 'trial') {
+          const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+          queryBuilder = queryBuilder.gt('created_at', twentyFourHoursAgo);
+        } else if (user.subscription_type === 'basic') {
+          queryBuilder = queryBuilder.limit(3);
+        } else if (user.subscription_type === 'premium') {
+          queryBuilder = queryBuilder.limit(5);
+        }
+
+        const { data: analyses, error } = await queryBuilder;
+        if (error) {
+          throw new Error('Ошибка получения анализов: ' + error.message);
+        }
+        responseData = analyses;
+      } else {
+        throw new Error('Недопустимый запрос');
+      }
+
+      // Отправляем данные обратно в Mini App через answerWebAppQuery
+      await ctx.answerWebAppQuery({
+        web_app_query_id: ctx.webAppData.query_id,
+        result: {
+          type: 'article',
+          id: ctx.webAppData.query_id,
+          title: 'Данные',
+          input_message_content: {
+            message_text: JSON.stringify(responseData),
+          },
+        },
+      });
+    } catch (err) {
+      console.error('Ошибка обработки запроса от Mini App:', err.message);
+      await ctx.answerWebAppQuery({
+        web_app_query_id: ctx.webAppData.query_id,
+        result: {
+          type: 'article',
+          id: ctx.webAppData.query_id,
+          title: 'Ошибка',
+          input_message_content: {
+            message_text: JSON.stringify({ error: err.message }),
+          },
+        },
+      });
+    }
   }
 });
 
@@ -161,7 +230,7 @@ bot.on('text', async (ctx) => {
           },
         ],
         generationConfig: {
-          maxOutputTokens: 400, // Уменьшаем лимит, чтобы избежать MAX_TOKENS
+          maxOutputTokens: 400,
           temperature: 0.7,
         },
       },
@@ -169,7 +238,7 @@ bot.on('text', async (ctx) => {
         headers: {
           'Content-Type': 'application/json',
         },
-        timeout: 5000, // Таймаут 5 секунд
+        timeout: 5000,
       }
     );
 
