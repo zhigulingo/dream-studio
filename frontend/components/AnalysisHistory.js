@@ -12,16 +12,35 @@ export default function AnalysisHistory({ userId, maxItems }) {
 
     log(`Запрос истории анализов для userId: ${userId}`);
     if (typeof window !== 'undefined' && window.Telegram?.WebApp) {
-      try {
-        window.Telegram.WebApp.sendData('/get_analyses');
-        log('Команда /get_analyses отправлена боту');
-        setTimeout(() => {
-          setError('Проверьте чат с ботом для получения истории анализов.');
-        }, 2000);
-      } catch (err) {
-        log('Ошибка отправки команды: ' + err.message);
-        setError('Не удалось запросить историю анализов. Попробуйте позже.');
-      }
+      const query = `fetch:/users/${userId}/analyses`;
+      log(`Отправка запроса: ${query}`);
+
+      window.Telegram.WebApp.sendData(query);
+
+      const handler = (event) => {
+        log('Получено событие от Telegram: ' + JSON.stringify(event));
+        if (event.data) {
+          try {
+            const response = JSON.parse(event.data);
+            if (response.error) {
+              log('Ошибка от бота: ' + response.error);
+              setError('Не удалось загрузить историю анализов: ' + response.error);
+            } else {
+              log('Данные анализов получены: ' + JSON.stringify(response));
+              setAnalyses(response.slice(0, maxItems));
+            }
+          } catch (err) {
+            log('Ошибка парсинга ответа: ' + err.message);
+            setError('Ошибка обработки данных анализов.');
+          }
+        }
+      };
+
+      window.Telegram.WebApp.onEvent('web_app_data', handler);
+
+      return () => {
+        window.Telegram.WebApp.offEvent('web_app_data', handler);
+      };
     } else {
       log('Telegram Web App не доступен');
       setError('Telegram Web App не доступен.');
