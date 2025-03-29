@@ -34,50 +34,114 @@ bot.start((ctx) => {
   });
 });
 
+bot.command('get_subscription', async (ctx) => {
+  const tgId = ctx.from.id;
+  console.log(`Получена команда /get_subscription от tgId: ${tgId}`);
+
+  const user = await getUser(tgId);
+  if (!user) {
+    return ctx.reply('Ошибка: пользователь не найден.');
+  }
+
+  ctx.reply(`Ваш тариф: ${user.subscription_type}\nОсталось токенов: ${user.tokens}`, {
+    parse_mode: 'Markdown',
+  });
+});
+
+bot.command('get_analyses', async (ctx) => {
+  const tgId = ctx.from.id;
+  console.log(`Получена команда /get_analyses от tgId: ${tgId}`);
+
+  const user = await getUser(tgId);
+  if (!user) {
+    return ctx.reply('Ошибка: пользователь не найден.');
+  }
+
+  let query = supabase
+    .from('analyses')
+    .select('*')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false });
+
+  if (user.subscription_type === 'trial') {
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    query = query.gt('created_at', twentyFourHoursAgo);
+  } else if (user.subscription_type === 'basic') {
+    query = query.limit(3);
+  } else if (user.subscription_type === 'premium') {
+    query = query.limit(5);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    console.error('Ошибка получения анализов:', error);
+    return ctx.reply('Ошибка: не удалось получить анализы.');
+  }
+
+  if (data.length === 0) {
+    return ctx.reply('История анализов пуста.');
+  }
+
+  let response = '📜 *История анализов:*\n\n';
+  data.forEach((analysis, index) => {
+    response += `*Сон ${index + 1}:* ${analysis.dream_text}\n`;
+    response += `*Анализ:* ${analysis.analysis}\n`;
+    response += `*Дата:* ${new Date(analysis.created_at).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })}\n\n`;
+  });
+
+  ctx.reply(response, { parse_mode: 'Markdown' });
+});
+
 bot.on('web_app_data', async (ctx) => {
   console.log('Получены данные от Mini App:', ctx.webAppData);
-  const tariff = ctx.webAppData.data; // 'basic' или 'premium'
+  const data = ctx.webAppData.data; // 'basic', 'premium', '/get_subscription', '/get_analyses'
   const tgId = ctx.from.id;
 
-  console.log(`Выбран тариф: ${tariff}, tgId: ${tgId}`);
+  console.log(`Получены данные: ${data}, tgId: ${tgId}`);
 
-  let user = await getUser(tgId);
-  if (!user) {
-    console.log('Пользователь не найден, создаем нового...');
-    user = await createUser(tgId);
+  if (data === 'basic' || data === 'premium') {
+    let user = await getUser(tgId);
     if (!user) {
-      console.log('Не удалось создать пользователя');
-      return ctx.reply('Ошибка: пользователь не найден и не удалось создать нового.');
+      console.log('Пользователь не найден, создаем нового...');
+      user = await createUser(tgId);
+      if (!user) {
+        console.log('Не удалось создать пользователя');
+        return ctx.reply('Ошибка: пользователь не найден и не удалось создать нового.');
+      }
     }
-  }
 
-  const prices = {
-    basic: { tokens: 15, stars: 1 },
-    premium: { tokens: 30, stars: 1 },
-  };
+    const prices = {
+      basic: { tokens: 15, stars: 1 },
+      premium: { tokens: 30, stars: 1 },
+    };
 
-  const selectedTariff = prices[tariff];
-  if (!selectedTariff) {
-    console.log('Недопустимый тариф:', tariff);
-    return ctx.reply('Ошибка: выбранный тариф недоступен.');
-  }
+    const selectedTariff = prices[data];
+    if (!selectedTariff) {
+      console.log('Недопустимый тариф:', data);
+      return ctx.reply('Ошибка: выбранный тариф недоступен.');
+    }
 
-  try {
-    console.log('Отправка инвойса...');
-    await ctx.replyWithInvoice(
-      `Тариф ${tariff.charAt(0).toUpperCase() + tariff.slice(1)}`,
-      `Получите ${selectedTariff.tokens} токенов за ${selectedTariff.stars} Stars`,
-      JSON.stringify({ tariff, tgId }),
-      process.env.PAYMENT_PROVIDER_TOKEN,
-      'XTR',
-      [
-        { label: `Тариф ${tariff}`, amount: selectedTariff.stars },
-      ]
-    );
-    console.log('Инвойс отправлен');
-  } catch (err) {
-    console.error('Ошибка отправки инвойса:', err);
-    ctx.reply('Ошибка при создании инвойса. Попробуйте позже.');
+    try {
+      console.log('Отправка инвойса...');
+      await ctx.replyWithInvoice(
+        `Тариф ${data.charAt(0).toUpperCase() + data.slice(1)}`,
+        `Получите ${selectedTariff.tokens} токенов за ${selectedTariff.stars} Stars`,
+        JSON.stringify({ tariff: data, tgId }),
+        process.env.PAYMENT_PROVIDER_TOKEN,
+        'XTR',
+        [
+          { label: `Тариф ${data}`, amount: selectedTariff.stars },
+        ]
+      );
+      console.log('Инвойс отправлен');
+    } catch (err) {
+      console.error('Ошибка отправки инвойса:', err);
+      ctx.reply('Ошибка при создании инвойса. Попробуйте позже.');
+    }
+  } else if (data === '/get_subscription' || data === '/get_analyses') {
+    // Перенаправляем на обработку команд
+    ctx.message = { text: data, from: ctx.from };
+    bot.handleUpdate({ update_id: ctx.update.update_id, message: ctx.message });
   }
 });
 
@@ -122,6 +186,11 @@ bot.on('text', async (ctx) => {
   console.log('Получено текстовое сообщение:', ctx.message.text, 'от:', ctx.from);
   const tgId = ctx.from.id;
   const dreamText = ctx.message.text;
+
+  // Проверяем, является ли текст командой
+  if (dreamText.startsWith('/')) {
+    return; // Команды обрабатываются отдельно
+  }
 
   let user = await getUser(tgId);
   if (!user) {
