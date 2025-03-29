@@ -12,7 +12,13 @@ export default function SubscriptionChecker({ userId }) {
     };
 
     log(`Запрос подписки для userId: ${userId}`);
-    axios.get(`https://sparkling-cupcake-940504.netlify.app/api/users/${userId}`)
+    axios.get(`https://sparkling-cupcake-940504.netlify.app/api/users/${userId}`, {
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      timeout: 10000, // Увеличиваем таймаут до 10 секунд
+    })
       .then(response => {
         log('Данные подписки получены: ' + JSON.stringify(response.data));
         setSubscription(response.data);
