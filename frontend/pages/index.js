@@ -20,7 +20,7 @@ export default function Home() {
       window.Telegram.WebApp.showPopup(
         {
           title: 'Тарифы',
-          message: 'Выберите тариф:\nTrial: 1 токен\nBasic: 15 токенов (30 Stars)\nPremium: 30 токенов (90 Stars)',
+          message: 'Выберите тариф:\nBasic: 15 токенов (1 Star)\nPremium: 30 токенов (1 Star)',
           buttons: [
             { id: 'basic', type: 'default', text: 'Basic' },
             { id: 'premium', type: 'default', text: 'Premium' },
@@ -75,6 +75,10 @@ export default function Home() {
           >
             Сравнить тарифы
           </button>
+          <div style={{ marginTop: '20px', padding: '10px', backgroundColor: '#f0f0f0', borderRadius: '5px' }}>
+            <h3>Логи (для отладки):</h3>
+            <p>Логи отображаются в консоли браузера. Если вы на мобильном устройстве, обратитесь к разработчику за помощью.</p>
+          </div>
         </>
       ) : (
         <>
