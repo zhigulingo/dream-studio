@@ -7,12 +7,11 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "telegraf": "^4.16.3",
+    "grammy": "^1.20.0",
     "axios": "^1.7.7",
     "@supabase/supabase-js": "^2.45.4",
     "fastify": "^4.28.1",
     "@fastify/cors": "^9.0.1",
-    "@google/generative-ai": "^0.24.0",
-    "grammy": "^1.20.0"
+    "@google/generative-ai": "^0.24.0"
   }
 }
