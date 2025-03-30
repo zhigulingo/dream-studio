@@ -174,6 +174,88 @@ exports.handler = async (event) => {
          console.log(`Received text from ${userId}: "${dreamText.substring(0, 50)}..."`);
          await analyzeDream(ctx, supabase, geminiModel, dreamText); // Передаем geminiModel
     });
+    // <<<--- ДОБАВЛЕНО: Обработчик SuccessfulPayment ---
+    bot.on('message:successful_payment', async (ctx) => {
+        const payment = ctx.message.successful_payment;
+        const userId = ctx.from.id; // ID пользователя, который платил
+        console.log(`Received SuccessfulPayment from ${userId}:`, payment);
+
+        // Распарсим payload, который мы создали в TMA
+        const payload = payment.invoice_payload; // Например: "sub_premium_3mo_638922962"
+        const parts = payload.split('_');
+        if (parts.length < 4 || parts[0] !== 'sub') {
+            console.error(`Invalid payload received: ${payload}`);
+            // Что делать в этом случае? Можно ничего не делать или уведомить админа.
+            return;
+        }
+
+        const plan = parts[1]; // 'premium' или 'basic'
+        const durationMonths = parseInt(parts[2].replace('mo', ''), 10);
+        const payloadUserId = parseInt(parts[3], 10); // ID из payload (для доп. проверки)
+
+        if (isNaN(durationMonths) || isNaN(payloadUserId) || payloadUserId !== userId) {
+             console.error(`Payload parsing error or user mismatch: payload=${payload}, userId=${userId}`);
+             // Можно уведомить пользователя об ошибке
+             // await ctx.reply("Произошла ошибка при обработке вашего платежа. Свяжитесь с поддержкой.").catch(logReplyError);
+             return;
+        }
+
+        console.log(`Processing payment for user ${userId}: Plan=${plan}, Duration=${durationMonths} months.`);
+
+        // Обновляем данные пользователя в Supabase
+        try {
+            if (!supabase) { // Убедимся, что клиент supabase доступен
+                 console.error("Supabase client not available in successful_payment handler!");
+                 throw new Error("Database client unavailable");
+            }
+
+             // Найти пользователя по tg_id
+            const { data: user, error: findError } = await supabase
+                .from('users').select('id, subscription_end').eq('tg_id', userId).single();
+
+            if (findError || !user) {
+                console.error(`User ${userId} not found in DB for successful payment!`);
+                throw new Error(`User ${userId} not found`);
+            }
+
+            // Рассчитать новую дату окончания подписки
+            const now = new Date();
+            let currentSubEnd = user.subscription_end ? new Date(user.subscription_end) : now;
+            // Если текущая подписка уже истекла, начинаем отсчет с "сейчас"
+            if (currentSubEnd < now) {
+                 currentSubEnd = now;
+            }
+            // Добавляем месяцы
+            const newSubEndDate = new Date(currentSubEnd.setMonth(currentSubEnd.getMonth() + durationMonths));
+
+            // Обновляем запись пользователя
+             const { error: updateError } = await supabase
+                 .from('users')
+                 .update({
+                     subscription_type: plan,
+                     subscription_end: newSubEndDate.toISOString(),
+                     // Можно добавить токены, если тариф basic их дает
+                     // tokens: (plan === 'basic' ? 30 : supabase.literal('tokens')) // Пример: basic дает 30 токенов, premium не меняет
+                 })
+                 .eq('id', user.id); // Обновляем по внутреннему ID
+
+            if (updateError) {
+                console.error(`Failed to update user ${userId} subscription in DB:`, updateError);
+                throw new Error("Database update failed");
+            }
+
+            console.log(`User ${userId} subscription updated: Plan=${plan}, Ends=${newSubEndDate.toISOString()}`);
+
+            // Отправляем пользователю сообщение об успехе
+            await ctx.reply(`Спасибо за оплату! Ваша подписка "${plan.toUpperCase()}" активна до ${newSubEndDate.toLocaleDateString()}. Приятного анализа снов!`).catch(logReplyError);
+
+        } catch (error) {
+             console.error(`Failed to process successful payment for user ${userId}:`, error);
+             // Уведомляем пользователя об ошибке обработки
+             await ctx.reply("Ваш платеж получен, но произошла ошибка при обновлении подписки. Пожалуйста, свяжитесь с поддержкой, указав детали платежа.").catch(logReplyError);
+        }
+    });
+
     bot.catch((err) => { /* ... код без изменений ... */
         const ctx = err.ctx; const e = err.error; console.error(`Error caught by bot.catch for update ${ctx.update.update_id}:`);
         if (e instanceof GrammyError) console.error("GrammyError:", e.description, e.payload);
