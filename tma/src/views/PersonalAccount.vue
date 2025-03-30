@@ -22,7 +22,7 @@
         </button>
       </div>
        <div v-else>
-            <p>Загрузите профиль.</p>
+            <p>Не удалось загрузить профиль.</p> <!-- Сообщение, если токены null после загрузки -->
        </div>
     </section>
 
@@ -57,80 +57,48 @@ import AnalysisHistoryList from '@/components/AnalysisHistoryList.vue'; // Ко�
 import SubscriptionModal from '@/components/SubscriptionModal.vue'; // Компонент модалки
 
 const userStore = useUserStore();
+const tg = window.Telegram?.WebApp;
 
-// Загружаем данные при монтировании компонента
 onMounted(async () => {
-    // Внутри onMounted в PersonalAccount.vue
-
-    if (window.Telegram?.WebApp) {
-        window.Telegram.WebApp.ready();
-        // Показываем кнопку
-        window.Telegram.WebApp.BackButton.show();
-        // Назначаем действие - закрытие приложения
-        window.Telegram.WebApp.BackButton.onClick(() => {
-             window.Telegram.WebApp.close(); // <<<--- ИЗМЕНЕНО
+    if (tg) {
+        tg.ready();
+        console.log("[PersonalAccount] Telegram WebApp is ready.");
+        // Управляем кнопкой Назад
+        tg.BackButton.show();
+        tg.BackButton.onClick(() => {
+            // Если модалка открыта, сначала закрываем ее
+             if (userStore.showSubscriptionModal) {
+                userStore.closeSubscriptionModal();
+             } else {
+                // Иначе закрываем приложение
+                 tg.close();
+             }
         });
+        // Важно: Прячем Main Button при первоначальной загрузке ЛК
+        if (tg.MainButton.isVisible) {
+            tg.MainButton.hide();
+        }
+    } else {
+        console.warn("[PersonalAccount] Telegram WebApp API not available.");
     }
+    // Загружаем данные
   await userStore.fetchProfile();
   await userStore.fetchHistory();
 });
 
-// Вспомогательная функция для форматирования даты
 const formatDate = (dateString) => {
   if (!dateString) return '';
-  try {
-    return new Date(dateString).toLocaleDateString();
-  } catch (e) {
-    return dateString; // Возвращаем как есть, если не дата
-  }
+  try { return new Date(dateString).toLocaleDateString(); } catch (e) { return dateString; }
 };
 </script>
 
 <style scoped>
-.personal-account {
-  padding: 15px;
-  color: var(--tg-theme-text-color); /* Используем переменные Telegram */
-  background-color: var(--tg-theme-bg-color);
-}
-
-.card {
-  background-color: var(--tg-theme-secondary-bg-color);
-  border-radius: 8px;
-  padding: 15px;
-  margin-bottom: 15px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-}
-
-h1, h2 {
-  color: var(--tg-theme-text-color);
-  margin-top: 0;
-  margin-bottom: 10px;
-}
-
-.capitalize {
-  text-transform: capitalize;
-}
-
-.error-message {
-    color: var(--tg-theme-destructive-text-color);
-    background-color: rgba(255, 0, 0, 0.1);
-    padding: 8px;
-    border-radius: 4px;
-}
-
-.change-plan-button {
-    background-color: var(--tg-theme-button-color);
-    color: var(--tg-theme-button-text-color);
-    border: none;
-    padding: 10px 15px;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 1em;
-    margin-top: 10px;
-    transition: background-color 0.2s ease;
-}
-.change-plan-button:hover {
-     /* Можно добавить эффект при наведении, если это не мобильное */
-     opacity: 0.9;
-}
+/* Стили остаются прежними */
+.personal-account { padding: 15px; color: var(--tg-theme-text-color); background-color: var(--tg-theme-bg-color); }
+.card { background-color: var(--tg-theme-secondary-bg-color); border-radius: 8px; padding: 15px; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1); }
+h1, h2 { color: var(--tg-theme-text-color); margin-top: 0; margin-bottom: 10px; }
+.capitalize { text-transform: capitalize; }
+.error-message { color: var(--tg-theme-destructive-text-color); background-color: rgba(255, 0, 0, 0.1); padding: 8px; border-radius: 4px; }
+.change-plan-button { background-color: var(--tg-theme-button-color); color: var(--tg-theme-button-text-color); border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; font-size: 1em; margin-top: 10px; transition: background-color 0.2s ease; }
+.change-plan-button:hover { opacity: 0.9; }
 </style>
