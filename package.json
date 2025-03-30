@@ -1,0 +1,19 @@
+{
+  "name": "dream-analyzer-repo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Dream Analyzer Bot and TMA",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "grammy": "^1.22.0",
+    "@supabase/supabase-js": "^2.43.1",
+    "@google/generative-ai": "^0.11.1"
+    // Если у вашего TMA есть свои зависимости, добавьте их сюда тоже,
+    // ИЛИ управляйте ими отдельно, если TMA собирается иначе.
+    // Но для работы Netlify Functions важно, чтобы ИХ зависимости были здесь.
+  },
+  "author": "",
+  "license": "ISC"
+}
