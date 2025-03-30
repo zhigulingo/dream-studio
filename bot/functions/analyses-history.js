@@ -4,10 +4,10 @@ const crypto = require('crypto');
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const BOT_TOKEN = process.env.BOT_TOKEN;
+const TMA_ORIGIN = process.env.TMA_URL;
 
-// --- Скопируйте сюда функцию validateTelegramData из user-profile.js ---
-function validateTelegramData(initData, botToken) {
-    // ... (полный код функции валидации)
+// --- Функция валидации Telegram InitData (остается без изменений) ---
+function validateTelegramData(initData, botToken) { /* ... (код функции) ... */
     if (!initData || !botToken) return { valid: false, data: null };
     const params = new URLSearchParams(initData);
     const hash = params.get('hash');
@@ -33,72 +33,96 @@ function validateTelegramData(initData, botToken) {
         return { valid: false, data: null };
     }
 }
-// --- Конец функции валидации ---
+
+// --- Заголовки CORS ---
+const generateCorsHeaders = (allowedOrigin) => {
+    const originToAllow = allowedOrigin || '*';
+    return {
+        'Access-Control-Allow-Origin': originToAllow,
+        'Access-Control-Allow-Headers': 'Content-Type, X-Telegram-Init-Data',
+        'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    };
+};
+
 
 exports.handler = async (event) => {
+    const corsHeaders = generateCorsHeaders(TMA_ORIGIN);
+
+    // --- Обработка Preflight запроса (OPTIONS) ---
+    if (event.httpMethod === 'OPTIONS') {
+        return { statusCode: 204, headers: corsHeaders, body: '' };
+    }
+
+    // --- Основная логика для GET запроса ---
     if (event.httpMethod !== 'GET') {
-        return { statusCode: 405, body: 'Method Not Allowed' };
+        return {
+            statusCode: 405,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ error: 'Method Not Allowed' })
+        };
     }
 
     const initData = event.headers['x-telegram-init-data'];
     if (!initData) {
-        return { statusCode: 401, body: 'Unauthorized: Missing Telegram InitData' };
+        return {
+            statusCode: 401,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ error: 'Unauthorized: Missing Telegram InitData' })
+        };
     }
 
     const validationResult = validateTelegramData(initData, BOT_TOKEN);
     if (!validationResult.valid || !validationResult.data?.id) {
         console.error("Invalid or missing Telegram User Data after validation");
-        return { statusCode: 401, body: 'Unauthorized: Invalid Telegram Data' };
+        return {
+            statusCode: 401,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ error: 'Unauthorized: Invalid Telegram Data' })
+        };
     }
 
     const tgUserId = validationResult.data.id;
     console.log(`Fetching history for validated tg_id: ${tgUserId}`);
 
-    if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
-        console.error("Missing Supabase credentials");
-        return { statusCode: 500, body: 'Internal Server Error: Configuration missing' };
-    }
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) { /* ... */ } // Проверка Supabase
 
     try {
         const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
-
-        // 1. Найти ID пользователя в таблице users по tg_id
         const { data: user, error: userFindError } = await supabase
-            .from('users')
-            .select('id')
-            .eq('tg_id', tgUserId)
-            .single(); // Ожидаем одного пользователя
+            .from('users').select('id').eq('tg_id', tgUserId).single();
 
         if (userFindError || !user) {
             console.error(`User not found in 'users' table for tg_id ${tgUserId}:`, userFindError);
-            // Если пользователя нет в users, у него не может быть истории
-            return { statusCode: 200, body: JSON.stringify([]), headers: { 'Content-Type': 'application/json' } };
+            return {
+                statusCode: 200, // Все равно OK, просто история пустая
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                body: JSON.stringify([])
+            };
         }
 
         const userDbId = user.id;
-
-        // 2. Получить историю анализов для этого user_id
         const { data: history, error: historyError } = await supabase
             .from('analyses')
-            .select('id, dream_text, analysis, created_at') // Выбираем нужные поля
-            .eq('user_id', userDbId) // Фильтруем по ID пользователя из таблицы users
-            .order('created_at', { ascending: false }) // Сортируем по дате, новые сверху
-            .limit(50); // Ограничиваем количество для начала
+            .select('id, dream_text, analysis, created_at')
+            .eq('user_id', userDbId)
+            .order('created_at', { ascending: false })
+            .limit(50);
 
-        if (historyError) {
-            console.error(`Supabase error fetching history for user_id ${userDbId}:`, historyError);
-            throw historyError;
-        }
+        if (historyError) throw historyError;
 
         console.log(`History fetched for user_id ${userDbId}. Count: ${history?.length ?? 0}`);
         return {
             statusCode: 200,
-            body: JSON.stringify(history || []), // Возвращаем массив истории или пустой массив
-            headers: { 'Content-Type': 'application/json' }
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }, // Добавляем CORS
+            body: JSON.stringify(history || [])
         };
 
     } catch (error) {
         console.error(`Error in analyses-history function for tg_id ${tgUserId}:`, error);
-        return { statusCode: 500, body: 'Internal Server Error' };
+        return {
+            statusCode: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }, // Добавляем CORS
+            body: JSON.stringify({ error: 'Internal Server Error' })
+        };
     }
 };
