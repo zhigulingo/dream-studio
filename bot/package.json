@@ -1,17 +1,16 @@
 {
-  "name": "dream-analyzer-bot",
+  "name": "dream-analyzer-bot-function",
   "version": "1.0.0",
-  "description": "Telegram Bot for Dream Analyzer",
-  "main": "index.js",
+  "description": "Telegram bot backend function for Dream Analyzer",
+  "main": "functions/bot.js",
   "scripts": {
-    "start": "node index.js"
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
-    "grammy": "^1.20.0",
-    "axios": "^1.7.7",
-    "@supabase/supabase-js": "^2.45.4",
-    "fastify": "^4.28.1",
-    "@fastify/cors": "^9.0.1",
-    "@google/generative-ai": "^0.24.0"
-  }
+    "grammy": "^1.22.0",  ปรับปรุงล่าสุด ณ ขณะนี้
+    "@supabase/supabase-js": "^2.43.1",  ปรับปรุงล่าสุด ณ ขณะนี้
+    "@google/generative-ai": "^0.11.1"  ปรับปรุงล่าสุด ณ ขณะนี้
+  },
+  "author": "",
+  "license": "ISC"
 }
