@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
+import axios from 'axios';
 
-export default function SubscriptionChecker({ userId }) {
+export default function SubscriptionChecker({ userId, onChangeTariff }) {
   const [subscription, setSubscription] = useState(null);
   const [error, setError] = useState(null);
   const [debugLog, setDebugLog] = useState('');
@@ -11,40 +12,26 @@ export default function SubscriptionChecker({ userId }) {
     };
 
     log(`Запрос подписки для userId: ${userId}`);
-    if (typeof window !== 'undefined' && window.Telegram?.WebApp) {
-      const query = `fetch:/users/${userId}`;
-      log(`Отправка запроса: ${query}`);
-
-      window.Telegram.WebApp.sendData(query);
-
-      const handler = (event) => {
-        log('Получено событие от Telegram: ' + JSON.stringify(event));
-        if (event.data) {
-          try {
-            const response = JSON.parse(event.data);
-            if (response.error) {
-              log('Ошибка от бота: ' + response.error);
-              setError('Не удалось загрузить информацию о подписке: ' + response.error);
-            } else {
-              log('Данные подписки получены: ' + JSON.stringify(response));
-              setSubscription(response);
-            }
-          } catch (err) {
-            log('Ошибка парсинга ответа: ' + err.message);
-            setError('Ошибка обработки данных о подписке.');
-          }
+    axios
+      .get(`https://tourmaline-eclair-9d40ea.netlify.app/proxy/user`, {
+        params: { tgId: userId },
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+        timeout: 5000,
+      })
+      .then((response) => {
+        log('Данные подписки получены: ' + JSON.stringify(response.data));
+        setSubscription(response.data);
+      })
+      .catch((err) => {
+        log('Ошибка получения подписки: ' + err.message);
+        if (err.response) {
+          log('Ответ сервера: ' + JSON.stringify(err.response.data));
         }
-      };
-
-      window.Telegram.WebApp.onEvent('web_app_data', handler);
-
-      return () => {
-        window.Telegram.WebApp.offEvent('web_app_data', handler);
-      };
-    } else {
-      log('Telegram Web App не доступен');
-      setError('Telegram Web App не доступен.');
-    }
+        setError('Не удалось загрузить информацию о подписке. Попробуйте позже.');
+      });
   }, [userId]);
 
   return (
@@ -65,8 +52,22 @@ export default function SubscriptionChecker({ userId }) {
         </>
       ) : (
         <>
-          <h3 style={{ margin: '0 0 10px 0' }}>Ваш тариф: {subscription.subscription_type}</h3>
-          <p style={{ margin: 0 }}>Осталось токенов: {subscription.tokens}</p>
+          <h3 style={{ margin: '0 0 10px 0' }}>
+            Ваш тариф: {subscription.subscription_type} | Токенов: {subscription.tokens}
+          </h3>
+          <button
+            onClick={onChangeTariff}
+            style={{
+              padding: '10px 20px',
+              backgroundColor: '#007bff',
+              color: 'white',
+              border: 'none',
+              borderRadius: '5px',
+              cursor: 'pointer',
+            }}
+          >
+            Изменить тариф
+          </button>
         </>
       )}
     </div>
