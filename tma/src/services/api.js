@@ -39,5 +39,14 @@ export default {
   getAnalysesHistory() {
     return apiClient.get('/analyses-history');
   },
-  // ... другие методы ...
+   // <<<--- НОВЫЙ МЕТОД ---
+  createInvoiceLink(plan, duration, amount, payload) {
+    return apiClient.post('/create-invoice', { // Используем POST
+        plan,
+        duration,
+        amount,
+        payload
+    });
+  }
+};
 };
