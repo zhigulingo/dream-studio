@@ -1,10 +1,16 @@
+// bot/functions/user-profile.js
+
+console.log('--- Triggering rebuild for user-profile function v2 ---'); // <<<--- ДОБАВЬТЕ ЭТУ СТРОКУ
+
 const { createClient } = require("@supabase/supabase-js");
 const crypto = require('crypto');
+// ... остальной код файла ...
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const TMA_ORIGIN = process.env.TMA_URL; // Ожидаем URL ТМА из переменных окружения
+
 
 // --- Функция валидации Telegram InitData (остается без изменений) ---
 function validateTelegramData(initData, botToken) { /* ... (код функции) ... */
