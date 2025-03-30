@@ -102,13 +102,76 @@ export const useUserStore = defineStore('user', {
     },
 
     // Действие для инициации платежа
-    initiatePayment() {
+    async initiatePayment() { // <<<--- Делаем async
         const amount = this.selectedInvoiceAmount;
-        if (!amount) {
-            console.error("Cannot initiate payment: amount is null");
-            alert("Please select a valid plan and duration."); // Уведомление пользователю
+        const tgUserId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id;
+
+        if (!amount || !tgUserId) {
+            console.error("Cannot initiate payment: missing amount or user ID.");
+            alert("Ошибка при подготовке платежа. Попробуйте снова.");
             return;
         }
+
+        const payload = `sub_${this.selectedPlan}_${this.selectedDuration}mo_${tgUserId}`;
+        console.log(`Preparing payment: amount=${amount}, payload=${payload}`);
+
+        // Показываем индикатор загрузки на кнопке
+        const tg = window.Telegram?.WebApp;
+        if (tg?.MainButton) {
+             tg.MainButton.showProgress(false); // Показать бесконечный индикатор
+             tg.MainButton.disable(); // Отключить кнопку на время запроса
+        }
+
+        try {
+            // 1. Запрашиваем ссылку на инвойс с бэкенда
+            const response = await api.createInvoiceLink(
+                this.selectedPlan,
+                this.selectedDuration,
+                amount,
+                payload
+            );
+
+            const invoiceUrl = response.data?.invoiceUrl;
+            if (!invoiceUrl) {
+                throw new Error("Backend did not return an invoice URL.");
+            }
+
+             console.log("Received invoice URL:", invoiceUrl);
+
+            // 2. Открываем окно оплаты Telegram
+            if (tg?.openInvoice) {
+                tg.openInvoice(invoiceUrl, (status) => {
+                    console.log("Invoice status:", status);
+                    if (status === 'paid') {
+                        alert("Оплата прошла успешно! Ваша подписка будет обновлена в ближайшее время.");
+                        this.closeSubscriptionModal(); // Закрываем модалку
+                        // Можно обновить профиль через пару секунд
+                        setTimeout(() => this.fetchProfile(), 3000);
+                    } else if (status === 'failed' || status === 'cancelled') {
+                        alert(`Платеж не удался (статус: ${status}). Пожалуйста, попробуйте еще раз.`);
+                    } else { // pending или другие статусы
+                        alert(`Статус платежа: ${status}.`);
+                    }
+                    // Скрываем индикатор и включаем кнопку после закрытия окна оплаты
+                    if (tg?.MainButton) {
+                       tg.MainButton.hideProgress();
+                       tg.MainButton.enable();
+                    }
+                });
+            } else {
+                throw new Error("Telegram WebApp openInvoice method not available.");
+            }
+
+        } catch (error) {
+            console.error("Error during payment initiation:", error);
+            alert(`Ошибка при создании платежа: ${error.response?.data?.error || error.message || 'Неизвестная ошибка'}`);
+            // Скрываем индикатор и включаем кнопку при ошибке
+             if (tg?.MainButton) {
+                 tg.MainButton.hideProgress();
+                 tg.MainButton.enable();
+             }
+        }
+    }
 
         // Создаем payload: строка, которую бот получит после успешной оплаты
         // и сможет использовать для обновления подписки пользователя.
