@@ -1,0 +1,23 @@
+// tma/package.json
+{
+  "name": "dream-analyzer-tma",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite", // Команда для локальной разработки (если используете Vite)
+    "build": "vite build", // Команда сборки для Netlify (если используете Vite)
+    "preview": "vite preview" // Для предпросмотра сборки локально
+  },
+  "dependencies": {
+    "axios": "^1.7.2", // Для API запросов
+    "pinia": "^2.1.7", // Для управления состоянием
+    "vue": "^3.4.27" // Основная библиотека Vue
+    
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.5", // Плагин Vite для Vue (если используете Vite)
+    "vite": "^5.2.12" // Инструмент сборки Vite (если используете)
+    // Если вы используете Vue CLI, здесь будут зависимости вроде @vue/cli-service, @vue/cli-plugin-babel и т.д.
+    // Добавьте сюда другие dev-зависимости (например, eslint, prettier)
+  }
+}
