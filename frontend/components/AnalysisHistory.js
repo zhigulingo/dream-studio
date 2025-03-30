@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import axios from 'axios';
 
 export default function AnalysisHistory({ userId, maxItems }) {
   const [analyses, setAnalyses] = useState([]);
@@ -11,40 +12,26 @@ export default function AnalysisHistory({ userId, maxItems }) {
     };
 
     log(`Запрос истории анализов для userId: ${userId}`);
-    if (typeof window !== 'undefined' && window.Telegram?.WebApp) {
-      const query = `fetch:/users/${userId}/analyses`;
-      log(`Отправка запроса: ${query}`);
-
-      window.Telegram.WebApp.sendData(query);
-
-      const handler = (event) => {
-        log('Получено событие от Telegram: ' + JSON.stringify(event));
-        if (event.data) {
-          try {
-            const response = JSON.parse(event.data);
-            if (response.error) {
-              log('Ошибка от бота: ' + response.error);
-              setError('Не удалось загрузить историю анализов: ' + response.error);
-            } else {
-              log('Данные анализов получены: ' + JSON.stringify(response));
-              setAnalyses(response.slice(0, maxItems));
-            }
-          } catch (err) {
-            log('Ошибка парсинга ответа: ' + err.message);
-            setError('Ошибка обработки данных анализов.');
-          }
+    axios
+      .get(`https://tourmaline-eclair-9d40ea.netlify.app/proxy/analyses`, {
+        params: { tgId: userId },
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+        timeout: 5000,
+      })
+      .then((response) => {
+        log('Данные анализов получены: ' + JSON.stringify(response.data));
+        setAnalyses(response.data.slice(0, maxItems));
+      })
+      .catch((err) => {
+        log('Ошибка получения анализов: ' + err.message);
+        if (err.response) {
+          log('Ответ сервера: ' + JSON.stringify(err.response.data));
         }
-      };
-
-      window.Telegram.WebApp.onEvent('web_app_data', handler);
-
-      return () => {
-        window.Telegram.WebApp.offEvent('web_app_data', handler);
-      };
-    } else {
-      log('Telegram Web App не доступен');
-      setError('Telegram Web App не доступен.');
-    }
+        setError('Не удалось загрузить историю анализов. Попробуйте позже.');
+      });
   }, [userId, maxItems]);
 
   return (
