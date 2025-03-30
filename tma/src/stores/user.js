@@ -23,8 +23,8 @@ export const useUserStore = defineStore('user', {
     isPremium: (state) => state.profile.subscription_type === 'premium',
     getPlanDetails: (state) => (plan, duration) => {
       const prices = {
-        premium: { 1: 2500, 3: 5000, 12: 10000 },
-        basic:   { 1: 1000, 3: 1500, 12: 5000 },
+        premium: { 1: 2500, 3: 5000, 12: 10000 }, // Цены в Stars!
+        basic:   { 1: 1000, 3: 1500, 12: 5000 }, // Цены в Stars!
       };
       const features = {
         premium: ["Безлимитные токены", "Ранний доступ к фичам", "Без рекламы"],
@@ -41,7 +41,7 @@ export const useUserStore = defineStore('user', {
       const details = this.getPlanDetails(state.selectedPlan, state.selectedDuration);
       return details.price;
     }
-  }, // <--- Убедитесь, что здесь есть запятая перед actions
+  }, // <--- Запятая перед actions
 
   actions: {
     async fetchProfile() {
@@ -75,26 +75,30 @@ export const useUserStore = defineStore('user', {
     }, // <--- Запятая
 
     openSubscriptionModal() {
-        this.showSubscriptionModal = true;
-        this.selectedPlan = 'premium';
-        this.selectedDuration = 3;
+        this.showSubscriptionModal = true; // Устанавливаем флаг
+        this.selectedPlan = 'premium'; // Сбрасываем на дефолт
+        this.selectedDuration = 3;     // Сбрасываем на дефолт
+        console.log("[UserStore] Opening subscription modal, showSubscriptionModal:", this.showSubscriptionModal); // Лог для отладки
     }, // <--- Запятая
 
     closeSubscriptionModal() {
         this.showSubscriptionModal = false;
+        console.log("[UserStore] Closing subscription modal, showSubscriptionModal:", this.showSubscriptionModal); // Лог
     }, // <--- Запятая
 
     selectPlan(plan) {
         this.selectedPlan = plan;
-        this.selectedDuration = 3;
+        this.selectedDuration = 3; // Сбрасываем длительность при смене плана
+        console.log(`[UserStore] Plan selected: ${plan}`); // Лог
     }, // <--- Запятая
 
     selectDuration(duration) {
         this.selectedDuration = duration;
-    }, // <--- Запятая! Вот вероятное место ошибки, если ее пропустили перед initiatePayment
+        console.log(`[UserStore] Duration selected: ${duration}`); // Лог
+    }, // <--- Запятая
 
     async initiatePayment() {
-        const amount = this.selectedInvoiceAmount; // Используем геттер через this
+        const amount = this.selectedInvoiceAmount; // Используем геттер
         const tgUserId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id;
 
         if (!amount || !tgUserId) {
@@ -104,15 +108,16 @@ export const useUserStore = defineStore('user', {
         }
 
         const payload = `sub_${this.selectedPlan}_${this.selectedDuration}mo_${tgUserId}`;
-        console.log(`Preparing payment: amount=${amount}, payload=${payload}`);
+        console.log(`[UserStore] Preparing payment: amount=${amount}, payload=${payload}`);
 
         const tg = window.Telegram?.WebApp;
         if (tg?.MainButton) {
-             tg.MainButton.showProgress(false);
-             tg.MainButton.disable();
+             tg.MainButton.showProgress(false); // Показать бесконечный индикатор
+             tg.MainButton.disable(); // Отключить кнопку на время запроса
         }
 
         try {
+            // 1. Запрашиваем ссылку на инвойс с бэкенда
             const response = await api.createInvoiceLink(
                 this.selectedPlan,
                 this.selectedDuration,
@@ -125,23 +130,34 @@ export const useUserStore = defineStore('user', {
                 throw new Error("Backend did not return an invoice URL.");
             }
 
-             console.log("Received invoice URL:", invoiceUrl);
+             console.log("[UserStore] Received invoice URL:", invoiceUrl);
 
+            // 2. Открываем окно оплаты Telegram
             if (tg?.openInvoice) {
                 tg.openInvoice(invoiceUrl, (status) => {
-                    console.log("Invoice status:", status);
+                    console.log("[UserStore] Invoice status:", status);
                     if (status === 'paid') {
                         alert("Оплата прошла успешно! Ваша подписка будет обновлена в ближайшее время.");
-                        this.closeSubscriptionModal();
+                        this.closeSubscriptionModal(); // Закрываем модалку
+                        // Обновляем профиль через пару секунд
                         setTimeout(() => this.fetchProfile(), 3000);
                     } else if (status === 'failed' || status === 'cancelled') {
                         alert(`Платеж не удался (статус: ${status}). Пожалуйста, попробуйте еще раз.`);
-                    } else {
+                    } else { // pending или другие статусы
                         alert(`Статус платежа: ${status}.`);
                     }
+                    // Скрываем индикатор и включаем кнопку после закрытия окна оплаты
                     if (tg?.MainButton) {
                        tg.MainButton.hideProgress();
                        tg.MainButton.enable();
+                       // Можно снова настроить кнопку на случай, если модалка еще открыта
+                       // watchEffect в модалке должен сам это сделать, но для надежности:
+                       // if (this.showSubscriptionModal) {
+                       //    const currentAmount = this.selectedInvoiceAmount;
+                       //    if (currentAmount) {
+                       //       tg.MainButton.setParams({ text: `Оплатить ${currentAmount} ⭐`, is_active: true });
+                       //    }
+                       // }
                     }
                 });
             } else {
@@ -149,13 +165,18 @@ export const useUserStore = defineStore('user', {
             }
 
         } catch (error) {
-            console.error("Error during payment initiation:", error);
+            console.error("[UserStore] Error during payment initiation:", error);
             alert(`Ошибка при создании платежа: ${error.response?.data?.error || error.message || 'Неизвестная ошибка'}`);
+            // Скрываем индикатор и включаем кнопку при ошибке
              if (tg?.MainButton) {
                  tg.MainButton.hideProgress();
                  tg.MainButton.enable();
+                 // Можно настроить текст кнопки на "Попробовать снова" или скрыть ее
+                 // if (this.showSubscriptionModal) {
+                 //    tg.MainButton.setParams({ text: 'Ошибка. Попробовать снова?', is_active: true });
+                 // }
              }
         }
-    } // <--- Нет запятой после последнего метода в actions
+    } // <--- Нет запятой после последнего метода
   } // <--- Конец actions
-}); // <--- Конец defineStore (строка ~228)
+});
