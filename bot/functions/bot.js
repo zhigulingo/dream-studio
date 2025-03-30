@@ -10,7 +10,10 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const TMA_URL = process.env.TMA_URL;
 
-// --- Вспомогательные Функции (без изменений в логике) ---
+// --- Вспомогательные Функции (без изменений) ---
+// ... (getOrCreateUser, getGeminiAnalysis, analyzeDream, logReplyError) ...
+// Код этих функций остается точно таким же, как в предыдущем ответе.
+// Я их сократил здесь для краткости, но в вашем файле они должны быть полностью.
 
 async function getOrCreateUser(supabase, userId) {
     if (!supabase) throw new Error("Supabase client not available in getOrCreateUser.");
@@ -33,10 +36,9 @@ async function getOrCreateUser(supabase, userId) {
 }
 
 async function getGeminiAnalysis(geminiModel, dreamText) {
-    // <<<--- ИЗМЕНЕНО: Обернем вызов Gemini в try-catch здесь же, чтобы лучше логировать ошибку ---
     if (!geminiModel) {
          console.error("Gemini model is null or undefined in getGeminiAnalysis.");
-         return "Ошибка: Сервис анализа не инициализирован."; // Возвращаем ошибку, если модель не передана
+         return "Ошибка: Сервис анализа не инициализирован.";
     }
     const MAX_DREAM_LENGTH = 4000;
     if (!dreamText || dreamText.trim().length === 0) return "Пожалуйста, опишите свой сон.";
@@ -45,42 +47,33 @@ async function getGeminiAnalysis(geminiModel, dreamText) {
     try {
         console.log("Requesting Gemini analysis...");
         const prompt = `Ты - эмпатичный толкователь снов. Проанализируй сон, сохраняя конфиденциальность, избегая мед. диагнозов/предсказаний. Сон: "${dreamText}". Анализ (2-4 абзаца): 1. Символы/значения. 2. Эмоции/связь с реальностью (если уместно). 3. Темы/сообщения. Отвечай мягко, поддерживающе.`;
-
-        // Используем generateContentAsync для потоковой передачи (хотя здесь мы ждем весь ответ)
-        // Это иногда помогает с таймаутами и обработкой ошибок
         const result = await geminiModel.generateContent(prompt);
-        const response = await result.response; // Дожидаемся полного ответа
+        const response = await result.response;
 
         if (response.promptFeedback?.blockReason) {
             console.warn(`Gemini blocked: ${response.promptFeedback.blockReason}`);
             return `Анализ не выполнен из-за ограничений безопасности (${response.promptFeedback.blockReason}). Попробуйте переформулировать.`;
         }
-        const analysisText = response.text(); // Получаем текст ответа
+        const analysisText = response.text();
         if (!analysisText || analysisText.trim().length === 0) {
             console.error("Gemini returned empty response.");
-            // Проверим, есть ли кандидаты вообще (может быть пустой ответ без ошибки)
-            if (!response.candidates || response.candidates.length === 0) {
-                 console.error("Gemini response candidates array is empty or missing.");
-            } else {
-                 console.log("Gemini response candidates:", JSON.stringify(response.candidates));
-            }
+            if (!response.candidates || response.candidates.length === 0) { console.error("Gemini response candidates array is empty or missing."); }
+            else { console.log("Gemini response candidates:", JSON.stringify(response.candidates)); }
             return "К сожалению, не удалось получить анализ (пустой ответ от сервиса).";
         }
         console.log("Gemini analysis received successfully.");
         return analysisText;
     } catch (error) {
-        console.error("Error explicitly caught in getGeminiAnalysis:", error); // Логируем ошибку здесь
-        // Проверяем специфичные ошибки Google AI
-         if (error.message && error.message.includes("API key not valid")) {
-            return "Ошибка: Неверный ключ API для сервиса анализа.";
-        } else if (error.status === 404 || (error.message && error.message.includes("404"))) {
+        console.error("Error explicitly caught in getGeminiAnalysis:", error);
+         if (error.message && error.message.includes("API key not valid")) { return "Ошибка: Неверный ключ API для сервиса анализа."; }
+         // <<<--- Уточним проверку на 404 ---
+         else if (error.status === 404 || (error.message && (error.message.includes("404") || error.message.includes("is not found")))) {
+             console.error(`Model not found error details: Status=${error.status}, Message=${error.message}`);
              return "Ошибка: Модель анализа не найдена или недоступна. Свяжитесь с поддержкой.";
-        }
-        // Общая ошибка
+         }
         return "Ошибка при связи с сервисом анализа. Попробуйте позже.";
     }
 }
-
 
 async function analyzeDream(ctx, supabase, geminiModel, dreamText) {
     const userId = ctx.from?.id;
@@ -101,43 +94,26 @@ async function analyzeDream(ctx, supabase, geminiModel, dreamText) {
         }
         if (processingMessage) { await ctx.api.editMessageText(ctx.chat.id, processingMessage.message_id, "Токен использован. Анализирую ваш сон... 🧠✨").catch(logReplyError); }
         else { await ctx.reply("Токен использован. Анализирую ваш сон... 🧠✨").catch(logReplyError); }
-
-        // Вызываем Gemini
-        const analysisResult = await getGeminiAnalysis(geminiModel, dreamText); // <<<--- Вызываем обновленную функцию
-
+        const analysisResult = await getGeminiAnalysis(geminiModel, dreamText);
         if (processingMessage) { await ctx.api.deleteMessage(ctx.chat.id, processingMessage.message_id).catch(e => console.warn("Could not delete status message:", e)); processingMessage = null; }
-
-        // <<<--- ИЗМЕНЕНО: Проверяем, вернула ли функция getGeminiAnalysis СТРОКУ с сообщением об ошибке ---
-        const isErrorResult = typeof analysisResult !== 'string' || // На всякий случай, если вернет не строку
-                             ["Пожалуйста,", "Извините,", "К сожалению,", "Ошибка:", "Анализ не выполнен"].some(prefix => analysisResult.startsWith(prefix));
-
+        const isErrorResult = typeof analysisResult !== 'string' || ["Пожалуйста,", "Извините,", "К сожалению,", "Ошибка:", "Анализ не выполнен"].some(prefix => analysisResult.startsWith(prefix));
         if (isErrorResult) {
-            // Просто отправляем текст ошибки, который вернула getGeminiAnalysis
             await ctx.reply(analysisResult || "Произошла неизвестная ошибка анализа.").catch(logReplyError);
-            console.warn(`Analysis for ${userId} failed or blocked, token consumed. Reason: ${analysisResult}`);
-            return; // Прерываем выполнение, анализ не сохраняем
+            console.warn(`Analysis for ${userId} failed or blocked, token consumed. Reason: ${analysisResult}`); return;
         }
-
-        // Если дошли сюда, значит анализ успешен (analysisResult содержит текст анализа)
         const { error: insertError } = await supabase
             .from('analyses').insert({ user_id: userDbId, dream_text: dreamText, analysis: analysisResult });
-
         if (insertError) {
             console.error(`Error saving analysis for user_id ${userDbId}:`, insertError);
             await ctx.reply("Сон проанализирован, но не удалось сохранить в историю. Вот результат:\n\n" + analysisResult).catch(logReplyError);
-            // <<<--- ИЗМЕНЕНО: Добавим пояснение про токены и здесь ---
              await ctx.reply("Проверить оставшиеся токены можно в Личном кабинете.", {
                 reply_markup: TMA_URL ? { inline_keyboard: [[{ text: "Открыть Личный кабинет 👤", web_app: { url: TMA_URL } }]] } : undefined
-            }).catch(logReplyError);
-            return;
+            }).catch(logReplyError); return;
         }
-
         console.log(`Analysis for ${userId} successful.`);
-        // <<<--- ИЗМЕНЕНО: Улучшаем сообщение об успехе ---
         await ctx.reply(`Вот анализ вашего сна:\n\n${analysisResult}\n\nАнализ сохранен. Проверить оставшиеся токены можно в Личном кабинете.`, {
             reply_markup: TMA_URL ? { inline_keyboard: [[{ text: "Открыть Личный кабинет 👤", web_app: { url: TMA_URL } }]] } : undefined
         }).catch(logReplyError);
-
     } catch (error) {
         console.error(`Critical error in analyzeDream for ${userId}:`, error);
          if (processingMessage) { await ctx.api.deleteMessage(ctx.chat.id, processingMessage.message_id).catch(e => console.warn("Could not delete status message on error:", e)); }
@@ -160,26 +136,27 @@ exports.handler = async (event) => {
         console.log("Initializing clients inside handler...");
         supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
         const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-        // <<<--- ИЗМЕНЕНО: Используем 'gemini-1.0-pro' ---
-        geminiModel = genAI.getGenerativeModel({ model: "gemini-1.0-pro" });
-        console.log("Using Gemini model: gemini-1.0-pro"); // Логируем используемую модель
+        // <<<--- ИЗМЕНЕНО: Используем 'gemini-2.0-flash' ---
+        geminiModel = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+        console.log("Using Gemini model: gemini-2.0-flash"); // Логируем правильную модель
         bot = new Bot(BOT_TOKEN);
         console.log("Bot instance created. Calling bot.init()...");
         await bot.init();
         console.log("bot.init() successful. Bot info:", bot.botInfo);
     } catch (initError) {
         console.error("FATAL: Failed to initialize clients or bot.init() failed:", initError);
-         // <<<--- ИЗМЕНЕНО: Проверяем ошибку инициализации Gemini ---
-         if (initError.message && initError.message.includes("Fetching model")) {
-              console.error("Specific error: Could not fetch the specified Gemini model. Check model name and API key permissions.");
-              return { statusCode: 500, body: "Internal Server Error: Failed to configure AI model." };
+         if (initError.message && initError.message.includes("Fetching model")) { console.error("Specific error: Could not fetch the specified Gemini model. Check model name and API key permissions."); return { statusCode: 500, body: "Internal Server Error: Failed to configure AI model." }; }
+         // <<<--- Добавим проверку на ошибку доступа к модели ---
+         else if (initError.status === 404 || (initError.message && (initError.message.includes("404") || initError.message.includes("is not found")))) {
+             console.error(`Model not found during initialization: Status=${initError.status}, Message=${initError.message}`);
+             return { statusCode: 500, body: "Internal Server Error: AI Model not found or inaccessible." };
          }
         return { statusCode: 500, body: "Internal Server Error: Bot initialization failed." };
     }
 
-    // Настройка обработчиков (без изменений)
+    // Настройка обработчиков
     console.log("Setting up bot handlers...");
-    bot.command("start", async (ctx) => {
+    bot.command("start", async (ctx) => { /* ... код без изменений ... */
         const userId = ctx.from?.id; if (!userId) return; console.log(`User ${userId} started bot.`);
         try {
             await getOrCreateUser(supabase, userId);
@@ -191,13 +168,13 @@ exports.handler = async (event) => {
             }).catch(logReplyError);
         } catch (e) { console.error("Error in /start handler:", e); await ctx.reply("Ошибка инициализации. Попробуйте /start еще раз.").catch(logReplyError); }
     });
-    bot.on("message:text", async (ctx) => {
+    bot.on("message:text", async (ctx) => { /* ... код без изменений ... */
          const dreamText = ctx.message.text; const userId = ctx.from?.id; if (!userId) return;
          if (dreamText.startsWith('/')) { console.log(`Ignoring command: ${dreamText}`); return; }
          console.log(`Received text from ${userId}: "${dreamText.substring(0, 50)}..."`);
          await analyzeDream(ctx, supabase, geminiModel, dreamText); // Передаем geminiModel
     });
-    bot.catch((err) => {
+    bot.catch((err) => { /* ... код без изменений ... */
         const ctx = err.ctx; const e = err.error; console.error(`Error caught by bot.catch for update ${ctx.update.update_id}:`);
         if (e instanceof GrammyError) console.error("GrammyError:", e.description, e.payload);
         else if (e instanceof HttpError) console.error("HttpError:", e);
@@ -206,7 +183,7 @@ exports.handler = async (event) => {
     });
     console.log("Bot handlers configured.");
 
-    // Обработка обновления (без изменений)
+    // Обработка обновления
     try {
         console.log("Passing update to bot.handleUpdate...");
         await bot.handleUpdate(update);
@@ -218,4 +195,5 @@ exports.handler = async (event) => {
     }
 };
 
+// <<<--- ИЗМЕНЕНО: Обновляем лог загрузки ---
 console.log("Netlify function bot.js (handler-init + bot.init() + gemini-2.0-flash) loaded.");
