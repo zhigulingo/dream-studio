@@ -1,118 +1,125 @@
-import { Bot, Context, session, SessionFlavor } from "grammy";
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
-import { GoogleGenerativeAI } from "@google/generative-ai"; // Новый импорт
-import dotenv from 'dotenv';
+// Используем require для импорта в Node.js среде Netlify Functions (CommonJS)
+const { Bot, session } = require("grammy");
+const { createClient } = require("@supabase/supabase-js");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 
-// Загрузка переменных окружения из .env файла (для локальной разработки)
-dotenv.config({ path: '../.env' }); // Указываем путь к .env в корне
-
-// --- Типы ---
-interface SessionData {
-  // Здесь можно хранить временные данные сессии, если нужно
-}
-type MyContext = Context & SessionFlavor<SessionData>;
-
-// --- Константы и Инициализация ---
+// --- Переменные Окружения (Netlify их предоставляет) ---
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const SUPABASE_URL = process.env.SUPABASE_URL;
-// Используем Service Role Key для бэкенда!
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY; // Новый ключ
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY; // Используем Service Role Key
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const TMA_URL = process.env.TMA_URL || "YOUR_TMA_URL"; // Замените YOUR_TMA_URL или добавьте переменную в Netlify
 
+// --- Проверка наличия переменных ---
 if (!BOT_TOKEN || !SUPABASE_URL || !SUPABASE_SERVICE_KEY || !GEMINI_API_KEY) {
-  console.error("Ошибка: Необходимые переменные окружения не установлены!");
-  process.exit(1); // Завершаем работу, если ключей нет
+  console.error("CRITICAL ERROR: Missing required environment variables!");
+  // Завершать процесс в лямбде не лучшая идея, просто логируем критическую ошибку
+  // throw new Error("Missing required environment variables!"); // Можно раскомментировать, чтобы функция завершилась с ошибкой
 }
 
 // --- Инициализация Клиентов ---
+let supabaseAdmin;
+let genAI;
+let geminiModel;
 
-// Клиент Supabase с правами администратора (Service Role)
-const supabaseAdmin: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
-    auth: {
-        // Отключаем автоматическое обновление токена для Service Key
-        autoRefreshToken: false,
-        persistSession: false
-    }
-});
-console.log("Supabase Admin Client инициализирован.");
+try {
+    // Клиент Supabase с правами администратора (Service Role)
+    supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
+        auth: {
+            autoRefreshToken: false,
+            persistSession: false
+        }
+    });
+    console.log("Supabase Admin Client initialized.");
 
-// Клиент Google Generative AI
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-const geminiModel = genAI.getGenerativeModel({ model: "gemini-pro" }); // Используем gemini-pro
-console.log("Gemini Client инициализирован (модель gemini-pro).");
+    // Клиент Google Generative AI
+    genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+    geminiModel = genAI.getGenerativeModel({ model: "gemini-pro" });
+    console.log("Gemini Client initialized (model gemini-pro).");
+
+} catch (initError) {
+    console.error("CRITICAL ERROR during client initialization:", initError);
+    // Если инициализация не удалась, бот работать не сможет
+    // throw initError; // Можно раскомментировать
+}
 
 // --- Функции ---
 
 /**
  * Получает или создает пользователя в базе данных.
- * @param userId - Telegram User ID
- * @returns ID пользователя в таблице users или null в случае ошибки
+ * @param {number} userId - Telegram User ID
+ * @returns {Promise<number | null>} ID пользователя в таблице users или null в случае ошибки
  */
-async function getOrCreateUser(userId: number): Promise<number | null> {
+async function getOrCreateUser(userId) {
+  if (!supabaseAdmin) {
+      console.error("Supabase client not initialized in getOrCreateUser");
+      return null;
+  }
   try {
-    // Проверяем, существует ли пользователь
     let { data: existingUser, error: selectError } = await supabaseAdmin
       .from('users')
       .select('id')
       .eq('tg_id', userId)
-      .single(); // single() вернет null, если не найдено, или ошибку, если найдено больше одного
+      .single();
 
     if (selectError && selectError.code !== 'PGRST116') { // PGRST116 - код "No rows found"
-      console.error(`Ошибка при поиске пользователя ${userId}:`, selectError);
+      console.error(`Error finding user ${userId}:`, selectError);
       return null;
     }
 
     if (existingUser) {
-      return existingUser.id; // Пользователь найден, возвращаем его ID
+      return existingUser.id;
     } else {
-      // Пользователь не найден, создаем нового с пробным токеном
+      console.log(`User ${userId} not found, creating...`);
       const { data: newUser, error: insertError } = await supabaseAdmin
         .from('users')
         .insert({
           tg_id: userId,
-          subscription_type: 'free', // Или ваш дефолтный тип
+          subscription_type: 'free',
           tokens: 1 // Даем 1 пробный токен
-          // subscription_end можно не устанавливать или установить null
         })
-        .select('id') // Возвращаем ID созданного пользователя
-        .single(); // single() нужен, т.к. insert возвращает массив
+        .select('id')
+        .single();
 
       if (insertError) {
-        console.error(`Ошибка при создании пользователя ${userId}:`, insertError);
+        console.error(`Error creating user ${userId}:`, insertError);
         return null;
       }
 
       if (newUser) {
-        console.log(`Создан новый пользователь: tg_id=${userId}, id=${newUser.id}`);
+        console.log(`Created new user: tg_id=${userId}, id=${newUser.id}`);
         return newUser.id;
       } else {
-        console.error(`Не удалось получить ID нового пользователя ${userId} после вставки.`);
+        console.error(`Failed to get new user ID for ${userId} after insert.`);
         return null;
       }
     }
   } catch (error) {
-    console.error(`Критическая ошибка в getOrCreateUser для ${userId}:`, error);
+    console.error(`Critical error in getOrCreateUser for ${userId}:`, error);
     return null;
   }
 }
 
 /**
  * Получает анализ сна от Gemini API.
- * @param dreamText - Текст сна.
- * @returns Строку с анализом или null в случае ошибки.
+ * @param {string} dreamText - Текст сна.
+ * @returns {Promise<string | null>} Строку с анализом или строку с ошибкой/предупреждением.
  */
-async function getGeminiAnalysis(dreamText: string): Promise<string | null> {
+async function getGeminiAnalysis(dreamText) {
+  if (!geminiModel) {
+      console.error("Gemini client not initialized in getGeminiAnalysis");
+      return "Ошибка: Сервис анализа не инициализирован.";
+  }
   if (!dreamText || dreamText.trim().length === 0) {
       return "Пожалуйста, опишите свой сон.";
   }
-  // Ограничение длины текста (пример)
-  const MAX_DREAM_LENGTH = 4000; // Ограничьте, чтобы контролировать расход токенов Gemini
+  const MAX_DREAM_LENGTH = 4000;
   if (dreamText.length > MAX_DREAM_LENGTH) {
       return `Извините, ваш сон слишком длинный (>${MAX_DREAM_LENGTH} символов). Попробуйте описать его короче.`;
   }
 
   try {
-    console.log("Запрос анализа к Gemini...");
+    console.log("Requesting analysis from Gemini...");
     const prompt = `Ты - эмпатичный и опытный толкователь снов. Проанализируй следующий сон пользователя, сохраняя конфиденциальность и избегая медицинских диагнозов или предсказаний будущего.
 Сон: "${dreamText}"
 
@@ -124,78 +131,102 @@ async function getGeminiAnalysis(dreamText: string): Promise<string | null> {
 
     const result = await geminiModel.generateContent(prompt);
     const response = await result.response;
-    const analysisText = response.text();
 
-    console.log("Анализ от Gemini получен.");
-    // Простая проверка на пустой или некорректный ответ
-    if (!analysisText || analysisText.trim().length === 0) {
-        console.error("Gemini вернул пустой ответ.");
-        return "К сожалению, не удалось получить анализ для вашего сна в данный момент.";
+    // Добавим проверку на safetyRatings (если есть блокировка)
+    if (response.promptFeedback?.blockReason) {
+        console.warn(`Gemini analysis blocked for safety reasons: ${response.promptFeedback.blockReason}`, response.promptFeedback.safetyRatings);
+        return `К сожалению, анализ вашего сна не может быть выполнен из-за ограничений безопасности контента (${response.promptFeedback.blockReason}). Пожалуйста, попробуйте переформулировать описание сна.`;
     }
 
-    // TODO: Добавить более строгую проверку ответа Gemini, если необходимо
-    // (например, проверка на наличие safetyRatings, если API их возвращает)
+    const analysisText = response.text();
+
+    console.log("Gemini analysis received.");
+    if (!analysisText || analysisText.trim().length === 0) {
+        console.error("Gemini returned an empty response.");
+        return "К сожалению, не удалось получить анализ для вашего сна в данный момент (пустой ответ).";
+    }
 
     return analysisText;
 
-  } catch (error: any) {
-    console.error("Ошибка при вызове Gemini API:", error);
-    // Можно добавить более специфичную обработку разных ошибок API Google
+  } catch (error) {
+    console.error("Error calling Gemini API:", error);
+    // Здесь можно добавить более детальное логирование ошибки error.message, error.stack
     return "Произошла ошибка при связи с сервисом анализа снов. Попробуйте позже.";
   }
 }
 
 /**
  * Обрабатывает запрос на анализ сна.
- * @param ctx - Контекст Grammy.
- * @param dreamText - Текст сна.
+ * @param {object} ctx - Контекст Grammy.
+ * @param {string} dreamText - Текст сна.
  */
-async function analyzeDream(ctx: MyContext, dreamText: string) {
+async function analyzeDream(ctx, dreamText) {
   const userId = ctx.from?.id;
   if (!userId) {
-    await ctx.reply("Не удалось идентифицировать пользователя.");
+    await ctx.reply("Не удалось идентифицировать пользователя.").catch(e => console.error("Reply error:", e));
     return;
+  }
+  if (!supabaseAdmin) {
+      console.error("Supabase client not initialized in analyzeDream");
+      await ctx.reply("Ошибка: Сервис базы данных не инициализирован.").catch(e => console.error("Reply error:", e));
+      return;
   }
 
   // 1. Получаем или создаем пользователя в БД
   const userDbId = await getOrCreateUser(userId);
   if (!userDbId) {
-      await ctx.reply("Произошла ошибка при доступе к вашему профилю. Попробуйте позже.");
+      await ctx.reply("Произошла ошибка при доступе к вашему профилю. Попробуйте позже.").catch(e => console.error("Reply error:", e));
       return;
   }
 
   // 2. Пытаемся списать токен АТОМАРНО через RPC
-  await ctx.reply("Проверяем наличие токенов и готовимся к анализу...");
+  await ctx.reply("Проверяем наличие токенов...").catch(e => console.error("Reply error:", e));
   try {
       const { data: tokenDecremented, error: rpcError } = await supabaseAdmin
           .rpc('decrement_token_if_available', { user_tg_id: userId });
 
       if (rpcError) {
-          console.error(`Ошибка RPC decrement_token_if_available для tg_id ${userId}:`, rpcError);
-          await ctx.reply("Произошла внутренняя ошибка при проверке токенов. Попробуйте позже.");
+          console.error(`RPC error decrement_token_if_available for tg_id ${userId}:`, rpcError);
+          await ctx.reply("Произошла внутренняя ошибка при проверке токенов. Попробуйте позже.").catch(e => console.error("Reply error:", e));
           return;
       }
 
       if (!tokenDecremented) {
-          console.log(`Недостаточно токенов для пользователя tg_id ${userId}.`);
-          // TODO: Добавить сообщение с предложением купить токены и кнопку/ссылку на TMA
-          await ctx.reply("У вас закончились бесплатные или купленные токены для анализа. Откройте Личный кабинет, чтобы пополнить баланс.", {
-            // reply_markup: ... // Сюда можно добавить кнопку для открытия TMA
-          });
+          console.log(`Not enough tokens for user tg_id ${userId}.`);
+          await ctx.reply("У вас закончились токены для анализа. Откройте Личный кабинет, чтобы пополнить баланс.", {
+             reply_markup: {
+                 inline_keyboard: [
+                   [{ text: "Открыть Личный кабинет 👤", web_app: { url: TMA_URL } }],
+                 ],
+             },
+          }).catch(e => console.error("Reply error:", e));
           return;
       }
 
       // 3. Если токен успешно списан - вызываем Gemini
-      console.log(`Токен списан для tg_id ${userId}. Вызов Gemini...`);
-      await ctx.reply("Токен использован. Анализирую ваш сон... 🧠✨");
+      console.log(`Token decremented for tg_id ${userId}. Calling Gemini...`);
+      // Используем editMessageText, чтобы заменить "Проверяем наличие токенов..."
+      const processingMessage = await ctx.reply("Токен использован. Анализирую ваш сон... 🧠✨ Пожалуйста, подождите.").catch(e => console.error("Reply error:", e));
+
       const analysisResult = await getGeminiAnalysis(dreamText);
 
-      if (!analysisResult || analysisResult.startsWith("Извините,") || analysisResult.startsWith("Произошла ошибка") || analysisResult.startsWith("Пожалуйста,")) {
-          // Если Gemini вернул ошибку или пустой результат
-          await ctx.reply(analysisResult || "Не удалось получить анализ.");
-          // ВАЖНО: Токен уже списан. Нужно решить: возвращать ли его?
-          // Пока просто сообщаем об ошибке. Для возврата нужна доп. логика.
-          console.warn(`Анализ для tg_id ${userId} не удался, но токен был списан.`);
+      // Проверяем, вернул ли Gemini ошибку или предупреждение (функция теперь возвращает их как строки)
+      const isErrorResult = !analysisResult ||
+                            analysisResult.startsWith("Извините,") ||
+                            analysisResult.startsWith("Произошла ошибка") ||
+                            analysisResult.startsWith("Пожалуйста,") ||
+                            analysisResult.startsWith("К сожалению,") ||
+                            analysisResult.startsWith("Ошибка:");
+
+      // Удаляем сообщение "Анализирую ваш сон..." или изменяем его, если была ошибка
+      if (processingMessage) {
+          await ctx.api.deleteMessage(ctx.chat.id, processingMessage.message_id).catch(e => console.error("Delete message error:", e));
+      }
+
+      if (isErrorResult) {
+          await ctx.reply(analysisResult || "Не удалось получить анализ.").catch(e => console.error("Reply error:", e));
+          console.warn(`Analysis for tg_id ${userId} failed or was blocked, but token was consumed.`);
+          // TODO: Рассмотреть логику возврата токена при определенных ошибках Gemini (например, blockReason)
           return;
       }
 
@@ -203,114 +234,131 @@ async function analyzeDream(ctx: MyContext, dreamText: string) {
       const { error: insertAnalysisError } = await supabaseAdmin
           .from('analyses')
           .insert({
-              user_id: userDbId, // Используем ID из нашей таблицы users
+              user_id: userDbId,
               dream_text: dreamText,
-              analysis: analysisResult
+              analysis: analysisResult // Сохраняем только успешный результат
           });
 
       if (insertAnalysisError) {
-          console.error(`Ошибка сохранения анализа для user_id ${userDbId}:`, insertAnalysisError);
-          await ctx.reply("Ваш сон проанализирован, но произошла ошибка при сохранении результата. Пожалуйста, попробуйте снова позже.");
-          // Опять же, токен списан.
+          console.error(`Error saving analysis for user_id ${userDbId}:`, insertAnalysisError);
+          await ctx.reply("Ваш сон проанализирован, но произошла ошибка при сохранении результата в историю. Пожалуйста, попробуйте сохранить его вручную или свяжитесь с поддержкой.").catch(e => console.error("Reply error:", e));
+          // Отправляем результат все равно, раз анализ успешен
+          await ctx.reply(`Результат анализа:\n\n${analysisResult}`).catch(e => console.error("Reply error:", e));
           return;
       }
 
       // 5. Отправляем результат пользователю
-      console.log(`Анализ для tg_id ${userId} успешно сохранен и отправлен.`);
-      await ctx.reply(`Вот анализ вашего сна:\n\n${analysisResult}\n\nВы можете посмотреть историю своих анализов в Личном кабинете.`); // TODO: Добавить кнопку ЛК
+      console.log(`Analysis for tg_id ${userId} successful, saved, and sent.`);
+      await ctx.reply(`Вот анализ вашего сна:\n\n${analysisResult}\n\nВы можете посмотреть историю своих анализов в Личном кабинете.`, {
+        reply_markup: {
+            inline_keyboard: [
+              [{ text: "Открыть Личный кабинет 👤", web_app: { url: TMA_URL } }],
+            ],
+        },
+      }).catch(e => console.error("Reply error:", e));
 
   } catch (error) {
-      console.error(`Критическая ошибка в analyzeDream для tg_id ${userId}:`, error);
-      await ctx.reply("Произошла непредвиденная ошибка при обработке вашего сна.");
+      console.error(`Critical error in analyzeDream for tg_id ${userId}:`, error);
+      await ctx.reply("Произошла непредвиденная ошибка при обработке вашего сна. Мы уже разбираемся.").catch(e => console.error("Reply error:", e));
   }
 }
 
 // --- Настройка Бота ---
-const bot = new Bot<MyContext>(BOT_TOKEN);
+// Инициализируем бота только если есть токен
+const bot = BOT_TOKEN ? new Bot(BOT_TOKEN) : null;
 
-// Middleware для сессий (если понадобится)
-bot.use(session({ initial: (): SessionData => ({}) }));
+if (bot) {
+    // Middleware для сессий (можно пока закомментировать, если не используется)
+    // bot.use(session({ initial: () => ({}) }));
 
-// Обработчик команды /start
-bot.command("start", async (ctx) => {
-  const userId = ctx.from?.id;
-  if (!userId) return; // Игнорируем, если нет ID
+    // Обработчик команды /start
+    bot.command("start", async (ctx) => {
+      const userId = ctx.from?.id;
+      if (!userId) {
+        console.warn("Received /start without user ID");
+        return;
+      }
+      console.log(`User ${userId} started bot.`);
+      try {
+          await getOrCreateUser(userId); // Ensure user exists
+          await ctx.reply(
+            "Добро пожаловать в Анализатор Снов! ✨\n\n" +
+            "Я помогу вам разобраться в значениях ваших сновидений с помощью искусственного интеллекта.\n\n" +
+            "У вас есть 1 бесплатный анализ. Просто опишите свой сон в следующем сообщении, и я постараюсь его растолковать.\n\n" +
+            "Также вы можете открыть свой Личный кабинет для просмотра истории и управления токенами.",
+            {
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: "Открыть Личный кабинет 👤", web_app: { url: TMA_URL } }],
+                ],
+              },
+            }
+          ).catch(e => console.error("Reply error:", e));
+      } catch(e) {
+          console.error("Error in /start handler:", e);
+          await ctx.reply("Произошла ошибка при инициализации. Попробуйте еще раз.").catch(e => console.error("Reply error:", e));
+      }
+    });
 
-  console.log(`Пользователь ${userId} запустил бота.`);
-  await getOrCreateUser(userId); // Убедимся, что пользователь есть в базе
+    // Обработчик текстовых сообщений (для анализа сна)
+    bot.on("message:text", async (ctx) => {
+      const dreamText = ctx.message.text;
+      const userId = ctx.from?.id;
+      if (!userId) {
+          console.warn("Received text message without user ID");
+          return;
+      }
+      console.log(`Received text from ${userId}: "${dreamText}"`);
 
-  await ctx.reply(
-    "Добро пожаловать в Анализатор Снов! ✨\n\n" +
-    "Я помогу вам разобраться в значениях ваших сновидений с помощью искусственного интеллекта.\n\n" +
-    "У вас есть 1 бесплатный анализ. Просто опишите свой сон в следующем сообщении, и я постараюсь его растолковать.\n\n" +
-    "Также вы можете открыть свой Личный кабинет для просмотра истории и управления токенами.",
-    {
-      reply_markup: {
-        inline_keyboard: [
-          // TODO: Заменить YOUR_TMA_URL на реальный URL вашего Mini App
-          [{ text: "Открыть Личный кабинет 👤", web_app: { url: process.env.TMA_URL || "YOUR_TMA_URL" } }],
-        ],
-      },
-    }
-  );
-});
+      if (dreamText.startsWith('/')) {
+        // Можно добавить ответ "Неизвестная команда" или просто игнорировать
+        console.log(`Ignoring command: ${dreamText}`);
+        return;
+      }
 
-// Обработчик текстовых сообщений (для анализа сна)
-bot.on("message:text", async (ctx) => {
-  const dreamText = ctx.message.text;
-  const userId = ctx.from?.id;
-  console.log(`Получен текст от ${userId}: "${dreamText}"`);
+      // Запускаем анализ сна
+      await analyzeDream(ctx, dreamText);
+    });
 
-  // Проверяем, не является ли текст командой
-  if (dreamText.startsWith('/')) {
-      // Можно добавить обработку других команд или просто игнорировать
-      // await ctx.reply("Неизвестная команда.");
-      return;
-  }
+    // Обработчик ошибок бота
+    bot.catch((err) => {
+      const ctx = err.ctx;
+      console.error(`Error while handling update ${ctx.update.update_id}:`);
+      const e = err.error;
+      if (e instanceof Error) {
+        console.error("Error:", e.stack || e.message);
+      } else {
+        console.error("Unknown error object:", e);
+      }
+      // Не пытаемся ответить пользователю здесь, чтобы избежать зацикливания ошибок
+    });
 
-  // Запускаем анализ сна
-  await analyzeDream(ctx, dreamText);
-});
-
-// Обработчик ошибок бота
-bot.catch((err) => {
-  const ctx = err.ctx;
-  console.error(`Ошибка при обработке обновления ${ctx.update.update_id}:`);
-  const e = err.error;
-  // Логируем ошибку более детально
-  if (e instanceof Error) {
-    console.error("Error:", e.stack || e.message);
-  } else {
-    console.error("Unknown error object:", e);
-  }
-  // Можно попробовать отправить сообщение пользователю, если это уместно
-  // ctx.reply("Извините, произошла внутренняя ошибка.").catch(e => console.error("Failed to send error message", e));
-});
-
+} else {
+    console.error("CRITICAL ERROR: Bot token not found, bot cannot be initialized!");
+}
 
 // --- Экспорт для Netlify ---
-// Важно: Netlify ожидает экспорт handler
-export const handler = async (event: any) => {
+// Используем стандартный `exports.handler` для CommonJS окружения Netlify
+exports.handler = async (event) => {
+    if (!bot) {
+        console.error("Handler called but bot is not initialized!");
+        return { statusCode: 500, body: "Internal Server Error: Bot not initialized" };
+    }
+    if (!event.body) {
+         console.warn("Handler called without event body");
+         return { statusCode: 400, body: "Bad Request: Missing event body" };
+    }
+
     try {
-        // Преобразуем событие Netlify в формат, понятный Grammy
-        // (Может потребоваться адаптер в зависимости от того, как Netlify вызывает функцию,
-        // но для стандартного вебхука `await bot.handleUpdate(JSON.parse(event.body))` часто работает)
-        await bot.handleUpdate(JSON.parse(event.body || '{}'));
-        return { statusCode: 200, body: "" }; // Отвечаем Telegram, что вебхук получен
+        // Передаем тело запроса (которое содержит Update от Telegram) в grammy
+        await bot.handleUpdate(JSON.parse(event.body));
+        // Telegram ожидает ответ 200 OK, чтобы понять, что вебхук получен
+        return { statusCode: 200, body: "" };
     } catch (error) {
-        console.error("Ошибка в главном обработчике:", error);
+        console.error("Error in Netlify handler:", error);
+        // Возвращаем 500, чтобы Telegram мог повторить попытку (если настроено)
         return { statusCode: 500, body: "Internal Server Error" };
     }
 };
 
-// --- Запуск для локальной разработки (не используется Netlify) ---
-// Этот блок кода не будет выполняться на Netlify, он нужен только для локального запуска
-// Например, через `ts-node bot/bot.ts`
-if (process.env.NODE_ENV !== 'production' && require.main === module) {
-  console.log("Запуск бота в режиме polling для локальной разработки...");
-  bot.start(); // Использует long polling
-
-  // Обработка сигналов для корректного завершения
-  process.once("SIGINT", () => bot.stop());
-  process.once("SIGTERM", () => bot.stop());
-}
+console.log("Netlify function bot.js loaded."); // Лог при загрузке функции
