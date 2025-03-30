@@ -48,7 +48,7 @@ const generateCorsHeaders = () => {
 
 
 exports.handler = async (event) => {
-    const corsHeaders = generateCorsHeaders(TMA_ORIGIN);
+    const corsHeaders = generateCorsHeaders();
 
     // --- Обработка Preflight запроса (OPTIONS) ---
     if (event.httpMethod === 'OPTIONS') {
