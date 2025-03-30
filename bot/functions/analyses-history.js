@@ -34,9 +34,11 @@ function validateTelegramData(initData, botToken) { /* ... (код функци�
     }
 }
 
-// --- Заголовки CORS ---
-const generateCorsHeaders = (allowedOrigin) => {
-    const originToAllow = allowedOrigin || '*';
+// --- Заголовки CORS (ВРЕМЕННАЯ ОТЛАДОЧНАЯ ВЕРСИЯ) ---
+const generateCorsHeaders = () => {
+    // !!! ВРЕМЕННО РАЗРЕШАЕМ ВСЕ ИСТОЧНИКИ ДЛЯ ОТЛАДКИ !!!
+    const originToAllow = '*';
+    console.log(`[DEBUG] Using CORS Allow-Origin: ${originToAllow}`); // Добавим лог
     return {
         'Access-Control-Allow-Origin': originToAllow,
         'Access-Control-Allow-Headers': 'Content-Type, X-Telegram-Init-Data',
