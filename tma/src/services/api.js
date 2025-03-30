@@ -1,27 +1,28 @@
 // tma/src/services/api.js
-import axios from 'axios'; // Установите axios, если еще не: npm install axios
+import axios from 'axios';
 
-// Базовый URL для ваших Netlify Functions
-// Обычно это URL вашего сайта Netlify + /.netlify/functions/
-// Можно вынести в .env
-const API_BASE_URL = '/.netlify/functions'; // Относительный путь работает, если TMA на том же домене
+// Используем переменную окружения Vite. Если она не задана,
+// можно использовать относительный путь как запасной вариант (хотя в вашем случае он не сработает).
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/.netlify/functions'; // <<<--- ИЗМЕНЕНО
+
+// Логируем URL, чтобы убедиться, что переменная прочиталась
+console.log('Using API Base URL:', API_BASE_URL);
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
 });
 
-// Перехватчик запросов для добавления initData
+// Перехватчик запросов для добавления initData (остается без изменений)
 apiClient.interceptors.request.use(
   (config) => {
-    // Проверяем, доступен ли объект Telegram WebApp
     if (window.Telegram?.WebApp?.initData) {
       config.headers['X-Telegram-Init-Data'] = window.Telegram.WebApp.initData;
-      console.log("Sending InitData header"); // Для отладки
+      console.log("Sending InitData header");
     } else {
         console.warn("Telegram WebApp initData not available.");
-        // В идеале, здесь нужно предотвращать запрос или обрабатывать ошибку,
-        // так как без initData API не авторизует пользователя.
-        // Пока просто выводим предупреждение.
+        // Важно: Если initData нет, запрос все равно уйдет, но бэкенд вернет 401.
+        // Можно добавить прерывание запроса здесь при необходимости.
+        // return Promise.reject(new Error("Missing Telegram InitData"));
     }
     return config;
   },
@@ -32,11 +33,11 @@ apiClient.interceptors.request.use(
 
 export default {
   getUserProfile() {
+    // Путь теперь будет конкатенироваться с полным базовым URL
     return apiClient.get('/user-profile');
   },
   getAnalysesHistory() {
     return apiClient.get('/analyses-history');
   },
-  // Здесь будут другие методы API, например, для создания ссылки на оплату
-  // createInvoiceLink(plan, duration) { ... }
+  // ... другие методы ...
 };
