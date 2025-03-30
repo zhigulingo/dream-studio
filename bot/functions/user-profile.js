@@ -35,7 +35,7 @@ function validateTelegramData(initData, botToken) { /* ... (код функци�
 }
 
 // --- Заголовки CORS ---
-const generateCorsHeaders = (allowedOrigin) => {
+const generateCorsHeaders = () => {
     // Если TMA_ORIGIN не задан, разрешаем все (менее безопасно, для отладки)
     const originToAllow = allowedOrigin || '*';
     return {
@@ -46,7 +46,7 @@ const generateCorsHeaders = (allowedOrigin) => {
 };
 
 exports.handler = async (event) => {
-    const corsHeaders = generateCorsHeaders(TMA_ORIGIN);
+    const corsHeaders = generateCorsHeaders();
 
     // --- Обработка Preflight запроса (OPTIONS) ---
     if (event.httpMethod === 'OPTIONS') {
