@@ -60,15 +60,15 @@ const userStore = useUserStore();
 
 // Загружаем данные при монтировании компонента
 onMounted(async () => {
-    // Инициализация Telegram WebApp (если еще не сделано глобально)
+    // Внутри onMounted в PersonalAccount.vue
+
     if (window.Telegram?.WebApp) {
         window.Telegram.WebApp.ready();
-        // Можно настроить кнопку Назад, если нужно
+        // Показываем кнопку
         window.Telegram.WebApp.BackButton.show();
+        // Назначаем действие - закрытие приложения
         window.Telegram.WebApp.BackButton.onClick(() => {
-             // Действие по кнопке назад (например, роутер назад или закрытие)
-             // window.Telegram.WebApp.close();
-             console.log("Back button clicked");
+             window.Telegram.WebApp.close(); // <<<--- ИЗМЕНЕНО
         });
     }
   await userStore.fetchProfile();
