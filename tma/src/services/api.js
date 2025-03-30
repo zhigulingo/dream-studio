@@ -3,7 +3,7 @@ import axios from 'axios';
 
 // Используем переменную окружения Vite. Если она не задана,
 // можно использовать относительный путь как запасной вариант (хотя в вашем случае он не сработает).
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/.netlify/functions'; // <<<--- ИЗМЕНЕНО
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
 // Логируем URL, чтобы убедиться, что переменная прочиталась
 console.log('Using API Base URL:', API_BASE_URL);
