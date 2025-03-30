@@ -40,27 +40,25 @@ function validateTelegramData(initData, botToken) { /* ... (код функци�
     }
 }
 
-// --- Заголовки CORS ---
+// --- Заголовки CORS (ВРЕМЕННАЯ ОТЛАДОЧНАЯ ВЕРСИЯ) ---
 const generateCorsHeaders = () => {
-    // Если TMA_ORIGIN не задан, разрешаем все (менее безопасно, для отладки)
-    const originToAllow = allowedOrigin || '*';
+    // !!! ВРЕМЕННО РАЗРЕШАЕМ ВСЕ ИСТОЧНИКИ ДЛЯ ОТЛАДКИ !!!
+    const originToAllow = '*';
+    console.log(`[DEBUG] Using CORS Allow-Origin: ${originToAllow}`); // Добавим лог
     return {
         'Access-Control-Allow-Origin': originToAllow,
-        'Access-Control-Allow-Headers': 'Content-Type, X-Telegram-Init-Data', // Разрешаем нужные заголовки
-        'Access-Control-Allow-Methods': 'GET, OPTIONS', // Разрешаем методы
+        'Access-Control-Allow-Headers': 'Content-Type, X-Telegram-Init-Data',
+        'Access-Control-Allow-Methods': 'GET, OPTIONS',
     };
 };
+
 
 exports.handler = async (event) => {
     const corsHeaders = generateCorsHeaders();
 
     // --- Обработка Preflight запроса (OPTIONS) ---
     if (event.httpMethod === 'OPTIONS') {
-        return {
-            statusCode: 204, // No Content
-            headers: corsHeaders,
-            body: '',
-        };
+        return { statusCode: 204, headers: corsHeaders, body: '' };
     }
 
     // --- Основная логика для GET запроса ---
