@@ -1,21 +1,21 @@
-# netlify.toml (Упрощенная версия для CORS)
+# netlify.toml (Финальная попытка для CORS)
 
 [functions]
   # Путь к папке с функциями бота
   directory = "bot/functions/"
   node_bundler = "esbuild"
 
-# --- ТОЛЬКО ОДНО ПРАВИЛО ДЛЯ CORS ---
-# Применяется к сайту, где развернуты функции (сайт бота)
+# --- Правила для добавления CORS заголовков ---
+# Применяются к сайту, где развернуты функции (сайт бота)
 [[headers]]
   # Применяем ко всем путям внутри директории функций
   for = "/.netlify/functions/*"
   [headers.values]
     # ЗАМЕНИТЕ НА URL ВАШЕГО TMA!
     Access-Control-Allow-Origin = "https://tourmaline-eclair-9d40ea.netlify.app"
-    # Другие заголовки (Allow-Methods, Allow-Headers) Netlify
-    # часто добавляет сам, если Origin разрешен. Попробуем без них.
-    # Если это не сработает, мы их вернем.
+    # Явно разрешаем методы и заголовки
+    Access-Control-Allow-Methods = "GET, POST, OPTIONS"
+    Access-Control-Allow-Headers = "Content-Type, X-Telegram-Init-Data"
+    # Access-Control-Max-Age = "86400" # Можно пока убрать
 
-# --- Убрали секцию [[redirects]] для OPTIONS ---
-# Позволим Netlify обработать OPTIONS по умолчанию
+# --- Секция [[redirects]] для OPTIONS УБРАНА ---
