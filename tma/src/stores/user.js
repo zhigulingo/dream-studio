@@ -23,8 +23,8 @@ export const useUserStore = defineStore('user', {
     isPremium: (state) => state.profile.subscription_type === 'premium',
     getPlanDetails: (state) => (plan, duration) => {
       const prices = {
-        premium: { 1: 2500, 3: 5000, 12: 10000 }, // Цены в Stars!
-        basic:   { 1: 1000, 3: 1500, 12: 5000 }, // Цены в Stars!
+        premium: { 1: 1, 3: 1, 12: 1 }, // Цены в Stars!
+        basic:   { 1: 1, 3: 1, 12: 1 }, // Цены в Stars!
       };
       const features = {
         premium: ["Безлимитные токены", "Ранний доступ к фичам", "Без рекламы"],
@@ -97,18 +97,22 @@ export const useUserStore = defineStore('user', {
         console.log(`[UserStore] Duration selected: ${duration}`);
     }, // <--- Запятая
 
-    async initiatePayment() { // Используем async
-        const amount = this.selectedInvoiceAmount;
-        const tgUserId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id;
+    // tma/src/stores/user.js -> actions: { ... }
 
-        if (!amount || !tgUserId) {
-            console.error("[UserStore] Cannot initiate payment: missing amount or user ID.");
-            alert("Ошибка при подготовке платежа. Попробуйте снова.");
+    async initiatePayment() {
+        const amount = this.selectedInvoiceAmount; // Теперь всегда 1 или null
+        const tgUserId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id;
+        const plan = this.selectedPlan;
+        const duration = this.selectedDuration;
+
+        if (!amount || !tgUserId || !plan || !duration) { // Проверяем все
+            console.error("[UserStore] Cannot initiate payment: missing data.", { amount, tgUserId, plan, duration });
+            alert("Ошибка: Не все данные для платежа выбраны.");
             return;
         }
 
-        const payload = `sub_${this.selectedPlan}_${this.selectedDuration}mo_${tgUserId}`;
-        console.log(`[UserStore] Preparing payment: amount=${amount}, payload=${payload}`);
+        const payload = `sub_${plan}_${duration}mo_${tgUserId}`;
+        console.log(`[UserStore] Preparing payment: amount=${amount}, payload=${payload}, plan=${plan}, duration=${duration}`);
 
         const tg = window.Telegram?.WebApp;
         if (tg?.MainButton) {
@@ -118,55 +122,67 @@ export const useUserStore = defineStore('user', {
 
         try {
             console.log("[UserStore] Requesting invoice link from backend...");
-            // 1. Запрашиваем ссылку на инвойс с бэкенда
+            // Логируем URL, на который пойдет запрос POST
+            const targetUrl = `${import.meta.env.VITE_API_BASE_URL}/create-invoice`;
+            console.log(`[UserStore] Target POST URL: ${targetUrl}`);
+
             const response = await api.createInvoiceLink(
-                this.selectedPlan,
-                this.selectedDuration,
+                plan,
+                duration,
                 amount,
                 payload
             );
 
+            // Если дошли сюда, запрос прошел успешно (статус 2xx)
             const invoiceUrl = response.data?.invoiceUrl;
             if (!invoiceUrl) {
                 console.error("[UserStore] Backend error: Did not return an invoice URL. Response:", response.data);
-                throw new Error("Не удалось получить ссылку для оплаты от сервера.");
+                throw new Error("Не удалось получить ссылку для оплаты от сервера (пустой ответ).");
             }
 
              console.log("[UserStore] Received invoice URL:", invoiceUrl);
 
-            // 2. Открываем окно оплаты Telegram
             if (tg?.openInvoice) {
                 tg.openInvoice(invoiceUrl, (status) => {
+                    // ... обработка статуса платежа ...
                     console.log("[UserStore] Invoice status received:", status);
-                    if (tg?.MainButton) { // Скрываем прогресс и включаем кнопку сразу
+                    if (tg?.MainButton) {
                        tg.MainButton.hideProgress();
                        tg.MainButton.enable();
                     }
-
-                    if (status === 'paid') {
-                        alert("Оплата прошла успешно! Ваша подписка будет обновлена в ближайшее время.");
-                        this.closeSubscriptionModal();
-                        setTimeout(() => this.fetchProfile(), 3500); // Обновляем профиль
-                    } else if (status === 'failed') {
-                         alert(`Платеж не удался (статус: ${status}). Пожалуйста, проверьте баланс Stars или попробуйте еще раз.`);
-                    } else if (status === 'cancelled') {
-                         alert("Платеж отменен.");
-                    } else {
-                        alert(`Статус платежа: ${status}. Возможно, потребуется некоторое время для завершения.`);
-                    }
+                    if (status === 'paid') { /* ... */ } else if (status === 'failed') { /* ... */ } // и т.д.
+                     if (status === 'paid') { alert("Оплата прошла успешно! Ваша подписка будет обновлена в ближайшее время."); this.closeSubscriptionModal(); setTimeout(() => this.fetchProfile(), 3500); } else if (status === 'failed') { alert(`Платеж не удался (статус: ${status}). Пожалуйста, проверьте баланс Stars или попробуйте еще раз.`); } else if (status === 'cancelled') { alert("Платеж отменен."); } else { alert(`Статус платежа: ${status}. Возможно, потребуется некоторое время для завершения.`); }
                 });
             } else {
                 throw new Error("Telegram WebApp openInvoice method not available.");
             }
 
         } catch (error) {
-            console.error("[UserStore] Error during payment initiation process:", error);
-            alert(`Ошибка при создании платежа: ${error.response?.data?.error || error.message || 'Неизвестная ошибка сервера'}`);
-             if (tg?.MainButton) { // Включаем кнопку при ошибке
+            console.error("[UserStore] Axios/Network Error during payment initiation:", error); // Общий лог ошибки
+
+            let alertMessage = 'Ошибка при создании платежа.';
+            if (error.response) {
+                // Ошибка пришла с ответом от сервера (статус не 2xx)
+                console.error('[UserStore] Backend Error Response:', error.response.data);
+                console.error('[UserStore] Backend Error Status:', error.response.status);
+                console.error('[UserStore] Backend Error Headers:', error.response.headers);
+                alertMessage = `Ошибка сервера (${error.response.status}): ${error.response.data?.error || 'Неизвестная ошибка'}`;
+            } else if (error.request) {
+                // Запрос был сделан, но ответ не получен (Network Error)
+                console.error('[UserStore] Network Error: No response received. Request:', error.request);
+                alertMessage = 'Сетевая ошибка: Не удалось связаться с сервером платежей. Проверьте интернет-соединение.';
+            } else {
+                // Ошибка настройки запроса или другая ошибка JS
+                console.error('[UserStore] Request Setup Error:', error.message);
+                alertMessage = `Ошибка настройки запроса: ${error.message}`;
+            }
+            alert(alertMessage); // Показываем ошибку пользователю
+
+            if (tg?.MainButton) {
                  tg.MainButton.hideProgress();
                  tg.MainButton.enable();
-             }
+            }
         }
-    } // <--- Нет запятой после последнего метода
+    } // Конец initiatePayment
   } // <--- Конец actions
 });
