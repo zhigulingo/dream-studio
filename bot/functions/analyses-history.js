@@ -1,10 +1,11 @@
-// bot/functions/analyses-history.js (Упрощенный)
+// bot/functions/analyses-history.js (С ручным CORS и * для отладки)
 const { createClient } = require("@supabase/supabase-js");
 const crypto = require('crypto');
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const BOT_TOKEN = process.env.BOT_TOKEN;
+// TMA_ORIGIN не используем, пока стоит '*'
 
 // --- Функция валидации Telegram InitData ---
 function validateTelegramData(initData, botToken) {
@@ -28,43 +29,76 @@ function validateTelegramData(initData, botToken) {
     } catch (error) { console.error("[analyses-history] Error during InitData validation:", error); return { valid: false, data: null }; }
 }
 
-exports.handler = async (event) => {
-    // --- Убрана обработка OPTIONS и генерация CORS ---
+// --- ВЕРНУЛИ Заголовки CORS (с * для отладки) ---
+const generateCorsHeaders = () => {
+    const originToAllow = '*'; // ВРЕМЕННО РАЗРЕШАЕМ ВСЕ
+    console.log(`[analyses-history] CORS Headers: Allowing Origin: ${originToAllow}`);
+    return {
+        'Access-Control-Allow-Origin': originToAllow,
+        'Access-Control-Allow-Headers': 'Content-Type, X-Telegram-Init-Data',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    };
+};
 
-    if (event.httpMethod !== 'GET') {
-        return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }), headers: { 'Content-Type': 'application/json' } };
+exports.handler = async (event) => {
+    const corsHeaders = generateCorsHeaders(); // <<<--- ВЕРНУЛИ вызов
+
+    // --- ВЕРНУЛИ Обработку Preflight запроса (OPTIONS) ---
+    if (event.httpMethod === 'OPTIONS') {
+        console.log("[analyses-history] Responding to OPTIONS request");
+        return { statusCode: 204, headers: corsHeaders, body: '' };
     }
 
+    // --- Обработка GET запроса ---
+    if (event.httpMethod !== 'GET') {
+         console.log(`[analyses-history] Method Not Allowed: ${event.httpMethod}`);
+        return { statusCode: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Method Not Allowed' }) };
+    }
+
+    // --- Валидация InitData ---
     const initData = event.headers['x-telegram-init-data'];
     if (!initData) {
-        return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized: Missing Telegram InitData' }), headers: { 'Content-Type': 'application/json' } };
+         console.warn("[analyses-history] Unauthorized: Missing Telegram InitData header");
+        return { statusCode: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Unauthorized: Missing Telegram InitData' }) };
     }
-
     const validationResult = validateTelegramData(initData, BOT_TOKEN);
     if (!validationResult.valid || !validationResult.data?.id) {
-        console.error("[analyses-history] Invalid or missing Telegram User Data after validation");
-        return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized: Invalid Telegram Data' }), headers: { 'Content-Type': 'application/json' } };
+         console.error("[analyses-history] Unauthorized: Invalid Telegram Data after validation");
+        return { statusCode: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Unauthorized: Invalid Telegram Data' }) };
     }
-
     const tgUserId = validationResult.data.id;
     console.log(`[analyses-history] Fetching history for validated tg_id: ${tgUserId}`);
 
+    // --- Проверка конфигурации ---
     if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
-        console.error("[analyses-history] Missing Supabase credentials");
-        return { statusCode: 500, body: JSON.stringify({ error: 'Internal Server Error: Configuration missing' }), headers: { 'Content-Type': 'application/json' } };
+         console.error("[analyses-history] Missing Supabase credentials");
+        return { statusCode: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Internal Server Error: Configuration missing' }) };
     }
+     if (!BOT_TOKEN) {
+         console.error("[analyses-history] Missing BOT_TOKEN for validation");
+        return { statusCode: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Internal Server Error: Bot configuration missing.' }) };
+     }
 
+    // --- Основная логика ---
     try {
         const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+        // 1. Найти ID пользователя
         const { data: user, error: userFindError } = await supabase
             .from('users').select('id').eq('tg_id', tgUserId).single();
 
         if (userFindError || !user) {
-            console.log(`[analyses-history] User not found in 'users' table for tg_id ${tgUserId}. Returning empty history.`);
-            return { statusCode: 200, body: JSON.stringify([]), /* Headers добавит Netlify */ };
+            // Если ошибка НЕ "не найдено", то логируем ее
+            if (userFindError && userFindError.code !== 'PGRST116') {
+                 console.error(`[analyses-history] Error finding user ${tgUserId}:`, userFindError);
+            } else {
+                 console.log(`[analyses-history] User ${tgUserId} not found in DB. Returning empty history.`);
+            }
+            // Возвращаем пустой массив в любом случае, если пользователя нет
+            return { statusCode: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify([]) };
         }
 
         const userDbId = user.id;
+        // 2. Получить историю
         const { data: history, error: historyError } = await supabase
             .from('analyses')
             .select('id, dream_text, analysis, created_at')
@@ -72,21 +106,24 @@ exports.handler = async (event) => {
             .order('created_at', { ascending: false })
             .limit(50);
 
-        if (historyError) throw historyError;
+        if (historyError) {
+            console.error(`[analyses-history] Supabase error fetching history for user_id ${userDbId}:`, historyError);
+            throw historyError;
+        }
 
         console.log(`[analyses-history] History fetched for user_id ${userDbId}. Count: ${history?.length ?? 0}`);
         return {
             statusCode: 200,
-            // Заголовки Content-Type и CORS добавит Netlify
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }, // Добавляем CORS
             body: JSON.stringify(history || [])
         };
 
     } catch (error) {
-        console.error(`[analyses-history] Error for tg_id ${tgUserId}:`, error);
+        console.error(`[analyses-history] Catch block error for tg_id ${tgUserId}:`, error);
         return {
             statusCode: 500,
-             // Заголовки Content-Type и CORS добавит Netlify
-            body: JSON.stringify({ error: 'Internal Server Error' })
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }, // Добавляем CORS
+            body: JSON.stringify({ error: 'Internal Server Error while fetching history.' })
         };
     }
 };
