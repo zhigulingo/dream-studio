@@ -50,9 +50,9 @@ export const useUserStore = defineStore('user', {
       try {
         const response = await api.getUserProfile();
         this.profile = response.data;
-        console.log("User profile loaded:", this.profile);
+        console.log("[UserStore] User profile loaded:", this.profile);
       } catch (err) {
-        console.error("Failed to fetch user profile:", err);
+        console.error("[UserStore] Failed to fetch user profile:", err);
         this.errorProfile = err.response?.data?.error || err.message || 'Failed to load profile';
       } finally {
         this.isLoadingProfile = false;
@@ -65,9 +65,9 @@ export const useUserStore = defineStore('user', {
       try {
         const response = await api.getAnalysesHistory();
         this.history = response.data;
-         console.log("Analysis history loaded, count:", this.history.length);
+         console.log("[UserStore] Analysis history loaded, count:", this.history.length);
       } catch (err) {
-        console.error("Failed to fetch analyses history:", err);
+        console.error("[UserStore] Failed to fetch analyses history:", err);
         this.errorHistory = err.response?.data?.error || err.message || 'Failed to load history';
       } finally {
         this.isLoadingHistory = false;
@@ -75,34 +75,34 @@ export const useUserStore = defineStore('user', {
     }, // <--- Запятая
 
     openSubscriptionModal() {
-        this.showSubscriptionModal = true; // Устанавливаем флаг
-        this.selectedPlan = 'premium'; // Сбрасываем на дефолт
-        this.selectedDuration = 3;     // Сбрасываем на дефолт
-        console.log("[UserStore] Opening subscription modal, showSubscriptionModal:", this.showSubscriptionModal); // Лог для отладки
+        this.showSubscriptionModal = true;
+        this.selectedPlan = 'premium';
+        this.selectedDuration = 3;
+        console.log("[UserStore] Opening subscription modal, showSubscriptionModal:", this.showSubscriptionModal);
     }, // <--- Запятая
 
     closeSubscriptionModal() {
         this.showSubscriptionModal = false;
-        console.log("[UserStore] Closing subscription modal, showSubscriptionModal:", this.showSubscriptionModal); // Лог
+        console.log("[UserStore] Closing subscription modal, showSubscriptionModal:", this.showSubscriptionModal);
     }, // <--- Запятая
 
     selectPlan(plan) {
         this.selectedPlan = plan;
-        this.selectedDuration = 3; // Сбрасываем длительность при смене плана
-        console.log(`[UserStore] Plan selected: ${plan}`); // Лог
+        this.selectedDuration = 3;
+        console.log(`[UserStore] Plan selected: ${plan}`);
     }, // <--- Запятая
 
     selectDuration(duration) {
         this.selectedDuration = duration;
-        console.log(`[UserStore] Duration selected: ${duration}`); // Лог
+        console.log(`[UserStore] Duration selected: ${duration}`);
     }, // <--- Запятая
 
-    async initiatePayment() {
-        const amount = this.selectedInvoiceAmount; // Используем геттер
+    async initiatePayment() { // Используем async
+        const amount = this.selectedInvoiceAmount;
         const tgUserId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id;
 
         if (!amount || !tgUserId) {
-            console.error("Cannot initiate payment: missing amount or user ID.");
+            console.error("[UserStore] Cannot initiate payment: missing amount or user ID.");
             alert("Ошибка при подготовке платежа. Попробуйте снова.");
             return;
         }
@@ -112,11 +112,12 @@ export const useUserStore = defineStore('user', {
 
         const tg = window.Telegram?.WebApp;
         if (tg?.MainButton) {
-             tg.MainButton.showProgress(false); // Показать бесконечный индикатор
-             tg.MainButton.disable(); // Отключить кнопку на время запроса
+             tg.MainButton.showProgress(false);
+             tg.MainButton.disable();
         }
 
         try {
+            console.log("[UserStore] Requesting invoice link from backend...");
             // 1. Запрашиваем ссылку на инвойс с бэкенда
             const response = await api.createInvoiceLink(
                 this.selectedPlan,
@@ -127,7 +128,8 @@ export const useUserStore = defineStore('user', {
 
             const invoiceUrl = response.data?.invoiceUrl;
             if (!invoiceUrl) {
-                throw new Error("Backend did not return an invoice URL.");
+                console.error("[UserStore] Backend error: Did not return an invoice URL. Response:", response.data);
+                throw new Error("Не удалось получить ссылку для оплаты от сервера.");
             }
 
              console.log("[UserStore] Received invoice URL:", invoiceUrl);
@@ -135,29 +137,22 @@ export const useUserStore = defineStore('user', {
             // 2. Открываем окно оплаты Telegram
             if (tg?.openInvoice) {
                 tg.openInvoice(invoiceUrl, (status) => {
-                    console.log("[UserStore] Invoice status:", status);
-                    if (status === 'paid') {
-                        alert("Оплата прошла успешно! Ваша подписка будет обновлена в ближайшее время.");
-                        this.closeSubscriptionModal(); // Закрываем модалку
-                        // Обновляем профиль через пару секунд
-                        setTimeout(() => this.fetchProfile(), 3000);
-                    } else if (status === 'failed' || status === 'cancelled') {
-                        alert(`Платеж не удался (статус: ${status}). Пожалуйста, попробуйте еще раз.`);
-                    } else { // pending или другие статусы
-                        alert(`Статус платежа: ${status}.`);
-                    }
-                    // Скрываем индикатор и включаем кнопку после закрытия окна оплаты
-                    if (tg?.MainButton) {
+                    console.log("[UserStore] Invoice status received:", status);
+                    if (tg?.MainButton) { // Скрываем прогресс и включаем кнопку сразу
                        tg.MainButton.hideProgress();
                        tg.MainButton.enable();
-                       // Можно снова настроить кнопку на случай, если модалка еще открыта
-                       // watchEffect в модалке должен сам это сделать, но для надежности:
-                       // if (this.showSubscriptionModal) {
-                       //    const currentAmount = this.selectedInvoiceAmount;
-                       //    if (currentAmount) {
-                       //       tg.MainButton.setParams({ text: `Оплатить ${currentAmount} ⭐`, is_active: true });
-                       //    }
-                       // }
+                    }
+
+                    if (status === 'paid') {
+                        alert("Оплата прошла успешно! Ваша подписка будет обновлена в ближайшее время.");
+                        this.closeSubscriptionModal();
+                        setTimeout(() => this.fetchProfile(), 3500); // Обновляем профиль
+                    } else if (status === 'failed') {
+                         alert(`Платеж не удался (статус: ${status}). Пожалуйста, проверьте баланс Stars или попробуйте еще раз.`);
+                    } else if (status === 'cancelled') {
+                         alert("Платеж отменен.");
+                    } else {
+                        alert(`Статус платежа: ${status}. Возможно, потребуется некоторое время для завершения.`);
                     }
                 });
             } else {
@@ -165,16 +160,11 @@ export const useUserStore = defineStore('user', {
             }
 
         } catch (error) {
-            console.error("[UserStore] Error during payment initiation:", error);
-            alert(`Ошибка при создании платежа: ${error.response?.data?.error || error.message || 'Неизвестная ошибка'}`);
-            // Скрываем индикатор и включаем кнопку при ошибке
-             if (tg?.MainButton) {
+            console.error("[UserStore] Error during payment initiation process:", error);
+            alert(`Ошибка при создании платежа: ${error.response?.data?.error || error.message || 'Неизвестная ошибка сервера'}`);
+             if (tg?.MainButton) { // Включаем кнопку при ошибке
                  tg.MainButton.hideProgress();
                  tg.MainButton.enable();
-                 // Можно настроить текст кнопки на "Попробовать снова" или скрыть ее
-                 // if (this.showSubscriptionModal) {
-                 //    tg.MainButton.setParams({ text: 'Ошибка. Попробовать снова?', is_active: true });
-                 // }
              }
         }
     } // <--- Нет запятой после последнего метода
