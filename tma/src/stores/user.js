@@ -1,14 +1,10 @@
 // tma/src/stores/user.js
 import { defineStore } from 'pinia';
-import api from '@/services/api'; // Мы все еще используем 'api' для GET запросов
+import api from '@/services/api'; // Для GET запросов
 
 export const useUserStore = defineStore('user', {
   state: () => ({
-    profile: {
-      tokens: null,
-      subscription_type: 'free',
-      subscription_end: null,
-    },
+    profile: { tokens: null, subscription_type: 'free', subscription_end: null },
     history: [],
     isLoadingProfile: false,
     isLoadingHistory: false,
@@ -22,204 +18,142 @@ export const useUserStore = defineStore('user', {
   getters: {
     isPremium: (state) => state.profile.subscription_type === 'premium',
     getPlanDetails: (state) => (plan, duration) => {
-      const prices = {
-        // ЦЕНЫ УСТАНОВЛЕНЫ В 1 ДЛЯ ТЕСТИРОВАНИЯ
-        premium: { 1: 1, 3: 1, 12: 1 },
-        basic:   { 1: 1, 3: 1, 12: 1 },
-      };
-      const features = {
-        premium: ["Безлимитные токены", "Ранний доступ к фичам", "Без рекламы"],
-        basic:   ["30 токенов в месяц", "Стандартный анализ", "Поддержка"],
-        free:    ["1 пробный токен"]
-      };
-      return {
-        price: prices[plan]?.[duration] ?? null,
-        features: features[plan] ?? [],
-        durationText: `${duration} Month${duration > 1 ? 's' : ''}`
-      };
+      const prices = { premium: { 1: 1, 3: 1, 12: 1 }, basic: { 1: 1, 3: 1, 12: 1 } }; // Test price = 1
+      const features = { premium: ["Безлимитные токены", "Ранний доступ к фичам", "Без рекламы"], basic: ["30 токенов в месяц", "Стандартный анализ", "Поддержка"], free: ["1 пробный токен"] };
+      return { price: prices[plan]?.[duration] ?? null, features: features[plan] ?? [], durationText: `${duration} Month${duration > 1 ? 's' : ''}` };
     },
     selectedInvoiceAmount(state) {
       const details = this.getPlanDetails(state.selectedPlan, state.selectedDuration);
       return details.price;
     }
-  }, // <--- Запятая перед actions
+  },
 
   actions: {
+    // fetchProfile и fetchHistory остаются без изменений (используют Axios из api.js)
     async fetchProfile() {
-      this.isLoadingProfile = true;
-      this.errorProfile = null;
-      try {
-        // Используем Axios для GET, так как он работал
-        const response = await api.getUserProfile();
-        this.profile = response.data;
-        console.log("[UserStore] User profile loaded:", this.profile);
-      } catch (err) {
-        console.error("[UserStore] Failed to fetch user profile:", err.response || err.request || err.message);
-        this.errorProfile = err.response?.data?.error || err.message || 'Network Error'; // Установим Network Error по умолчанию
-      } finally {
-        this.isLoadingProfile = false;
-      }
-    }, // <--- Запятая
-
+      this.isLoadingProfile = true; this.errorProfile = null;
+      try { const response = await api.getUserProfile(); this.profile = response.data; console.log("[UserStore] Profile loaded:", this.profile); }
+      catch (err) { console.error("[UserStore] Failed fetchProfile:", err.response || err.request || err.message); this.errorProfile = err.response?.data?.error || err.message || 'Network Error'; }
+      finally { this.isLoadingProfile = false; }
+    },
     async fetchHistory() {
-      this.isLoadingHistory = true;
-      this.errorHistory = null;
-      try {
-         // Используем Axios для GET
-        const response = await api.getAnalysesHistory();
-        this.history = response.data;
-         console.log("[UserStore] Analysis history loaded, count:", this.history.length);
-      } catch (err) {
-        console.error("[UserStore] Failed to fetch analyses history:", err.response || err.request || err.message);
-        this.errorHistory = err.response?.data?.error || err.message || 'Network Error'; // Установим Network Error по умолчанию
-      } finally {
-        this.isLoadingHistory = false;
-      }
-    }, // <--- Запятая
+      this.isLoadingHistory = true; this.errorHistory = null;
+      try { const response = await api.getAnalysesHistory(); this.history = response.data; console.log("[UserStore] History loaded, count:", this.history.length); }
+      catch (err) { console.error("[UserStore] Failed fetchHistory:", err.response || err.request || err.message); this.errorHistory = err.response?.data?.error || err.message || 'Network Error'; }
+      finally { this.isLoadingHistory = false; }
+    },
+    openSubscriptionModal() { this.showSubscriptionModal = true; this.selectedPlan = 'premium'; this.selectedDuration = 3; console.log("[UserStore] Opening modal"); },
+    closeSubscriptionModal() { this.showSubscriptionModal = false; console.log("[UserStore] Closing modal"); },
+    selectPlan(plan) { this.selectedPlan = plan; this.selectedDuration = 3; console.log(`[UserStore] Plan selected: ${plan}`); },
+    selectDuration(duration) { this.selectedDuration = duration; console.log(`[UserStore] Duration selected: ${duration}`); },
 
-    openSubscriptionModal() {
-        this.showSubscriptionModal = true;
-        this.selectedPlan = 'premium';
-        this.selectedDuration = 3;
-        console.log("[UserStore] Opening subscription modal, showSubscriptionModal:", this.showSubscriptionModal);
-    }, // <--- Запятая
-
-    closeSubscriptionModal() {
-        this.showSubscriptionModal = false;
-        console.log("[UserStore] Closing subscription modal, showSubscriptionModal:", this.showSubscriptionModal);
-    }, // <--- Запятая
-
-    selectPlan(plan) {
-        this.selectedPlan = plan;
-        this.selectedDuration = 3;
-        console.log(`[UserStore] Plan selected: ${plan}`);
-    }, // <--- Запятая
-
-    selectDuration(duration) {
-        this.selectedDuration = duration;
-        console.log(`[UserStore] Duration selected: ${duration}`);
-    }, // <--- Запятая
-
-    // Используем FETCH для initiatePayment
+    // --- initiatePayment с подробным логированием ---
     async initiatePayment() {
-        const amount = this.selectedInvoiceAmount;
-        const tgUserId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id;
-        const plan = this.selectedPlan;
-        const duration = this.selectedDuration;
-
-        if (!amount || !tgUserId || !plan || !duration) {
-            console.error("[UserStore] Cannot initiate payment: missing data.", { amount, tgUserId, plan, duration });
-            alert("Ошибка: Не все данные для платежа выбраны.");
-            return;
-        }
-
-        const payload = `sub_${plan}_${duration}mo_${tgUserId}`;
-        console.log(`[UserStore] Preparing payment: amount=${amount}, payload=${payload}, plan=${plan}, duration=${duration}`);
+        console.log("[UserStore:initiatePayment] Action started."); // <<< ЛОГ 1
 
         const tg = window.Telegram?.WebApp;
-        if (tg?.MainButton) {
-             tg.MainButton.showProgress(false);
-             tg.MainButton.disable();
-        }
+        let amount = null;
+        let tgUserId = null;
+        let plan = null;
+        let duration = null;
+        let payload = null;
+        let initDataHeader = null;
 
+        // Обернем все подготовительные шаги в try-catch
         try {
-            console.log("[UserStore] Requesting invoice link from backend using fetch...");
-            // URL для POST запроса
-            const baseUrl = import.meta.env.VITE_API_BASE_URL; // Считываем из переменных окружения
-             if (!baseUrl) {
-                throw new Error("Конфигурация API не загружена (VITE_API_BASE_URL).");
-            }
-            const targetUrl = `${baseUrl}/create-invoice`;
-            console.log(`[UserStore] Target POST URL (fetch): ${targetUrl}`);
+            console.log("[UserStore:initiatePayment] Reading state and initData..."); // <<< ЛОГ 2
+            amount = this.selectedInvoiceAmount;
+            tgUserId = tg?.initDataUnsafe?.user?.id; // Пробуем получить ID
+            plan = this.selectedPlan;
+            duration = this.selectedDuration;
+            initDataHeader = tg?.initData; // Пробуем получить initData
 
-            // Проверяем наличие initData
-            const initDataHeader = window.Telegram?.WebApp?.initData;
+            console.log("[UserStore:initiatePayment] Values:", { amount, tgUserId, plan, duration, initDataAvailable: !!initDataHeader }); // <<< ЛОГ 3
+
+            if (!amount || !tgUserId || !plan || !duration) {
+                throw new Error("Отсутствуют необходимые данные для платежа (сумма, ID пользователя, план или длительность).");
+            }
             if (!initDataHeader) {
                 throw new Error("Telegram InitData не найден. Невозможно авторизовать запрос.");
             }
 
-            // Опции для fetch
+            payload = `sub_${plan}_${duration}mo_${tgUserId}`;
+            console.log(`[UserStore:initiatePayment] Payload created: ${payload}`); // <<< ЛОГ 4
+
+            if (tg?.MainButton) {
+                 console.log("[UserStore:initiatePayment] Showing MainButton progress..."); // <<< ЛОГ 5
+                 tg.MainButton.showProgress(false);
+                 tg.MainButton.disable();
+            } else {
+                 console.warn("[UserStore:initiatePayment] MainButton API not available.");
+            }
+
+            // --- Попытка выполнить fetch ---
+            console.log("[UserStore:initiatePayment] Preparing fetch request..."); // <<< ЛОГ 6
+            const baseUrl = import.meta.env.VITE_API_BASE_URL;
+            if (!baseUrl) { throw new Error("Конфигурация API не загружена (VITE_API_BASE_URL)."); }
+            const targetUrl = `${baseUrl}/create-invoice`;
+            console.log(`[UserStore:initiatePayment] Target fetch URL: ${targetUrl}`); // <<< ЛОГ 7
+
             const requestOptions = {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Telegram-Init-Data': initDataHeader
-                },
-                body: JSON.stringify({
-                    plan: plan,
-                    duration: duration,
-                    amount: amount,
-                    payload: payload
-                })
+                headers: { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': initDataHeader },
+                body: JSON.stringify({ plan, duration, amount, payload })
             };
 
-            console.log("[UserStore] Fetch request options (excluding headers):", { method: requestOptions.method, body: requestOptions.body });
+            console.log("[UserStore:initiatePayment] Sending fetch request..."); // <<< ЛОГ 8
 
             const response = await fetch(targetUrl, requestOptions);
 
-            console.log("[UserStore] Fetch response status:", response.status);
-            console.log("[UserStore] Fetch response ok:", response.ok);
+            console.log("[UserStore:initiatePayment] Fetch response received. Status:", response.status, "Ok:", response.ok); // <<< ЛОГ 9
 
             if (!response.ok) {
                 let errorText = `HTTP error! Status: ${response.status}`;
-                try {
-                    const errorData = await response.json();
-                    errorText = errorData.error || JSON.stringify(errorData);
-                } catch (e) {
-                    try { errorText = await response.text(); } catch (e2) { /* Используем HTTP статус */ }
-                }
-                 console.error("[UserStore] Backend error response text/data:", errorText);
-                throw new Error(errorText);
+                try { const errorData = await response.json(); errorText = errorData.error || JSON.stringify(errorData); }
+                catch (e) { try { errorText = await response.text(); } catch (e2) {} }
+                console.error("[UserStore:initiatePayment] Backend error response:", errorText);
+                throw new Error(errorText); // Передаем ошибку от бэкенда
             }
 
-            // Ответ ОК (2xx)
             const responseData = await response.json();
             const invoiceUrl = responseData?.invoiceUrl;
 
             if (!invoiceUrl) {
-                console.error("[UserStore] Backend error: Did not return an invoice URL in JSON. Response:", responseData);
-                throw new Error("Не удалось получить ссылку для оплаты от сервера (неверный формат ответа).");
+                console.error("[UserStore:initiatePayment] Backend response missing invoiceUrl:", responseData);
+                throw new Error("Не удалось получить ссылку для оплаты от сервера.");
             }
 
-            console.log("[UserStore] Received invoice URL via fetch:", invoiceUrl);
+            console.log("[UserStore:initiatePayment] Received invoice URL:", invoiceUrl); // <<< ЛОГ 10
 
-            // Открываем окно оплаты
+            // --- Попытка открыть инвойс ---
             if (tg?.openInvoice) {
+                 console.log("[UserStore:initiatePayment] Calling tg.openInvoice..."); // <<< ЛОГ 11
                 tg.openInvoice(invoiceUrl, (status) => {
-                    console.log("[UserStore] Invoice status received:", status);
+                    console.log("[UserStore:initiatePayment] Invoice status callback:", status); // <<< ЛОГ 12
                     if (tg?.MainButton) { tg.MainButton.hideProgress(); tg.MainButton.enable(); }
-
-                    if (status === 'paid') {
-                        alert("Оплата прошла успешно! Ваша подписка будет обновлена в ближайшее время.");
-                        this.closeSubscriptionModal();
-                        setTimeout(() => this.fetchProfile(), 3500);
-                    } else if (status === 'failed') {
-                        alert(`Платеж не удался (статус: ${status}). Пожалуйста, проверьте баланс Stars или попробуйте еще раз.`);
-                    } else if (status === 'cancelled') {
-                        alert("Платеж отменен.");
-                    } else {
-                        alert(`Статус платежа: ${status}. Возможно, потребуется некоторое время для завершения.`);
-                    }
+                    // ... обработка статусов ...
+                     if (status === 'paid') { alert("Оплата прошла успешно!"); this.closeSubscriptionModal(); setTimeout(() => this.fetchProfile(), 3500); } else if (status === 'failed') { alert(`Платеж не удался: ${status}`); } else if (status === 'cancelled') { alert("Платеж отменен."); } else { alert(`Статус платежа: ${status}.`); }
                 });
+                 console.log("[UserStore:initiatePayment] tg.openInvoice called."); // <<< ЛОГ 13
             } else {
                 throw new Error("Telegram WebApp openInvoice method not available.");
             }
 
         } catch (error) {
-            console.error("[UserStore] Error during fetch/payment initiation process:", error);
-            // Определяем тип ошибки для сообщения пользователю
-            let alertMessage = `Ошибка при создании платежа: ${error.message || 'Неизвестная ошибка'}`;
-            // Проверяем, является ли это ошибкой сети (fetch падает с TypeError для network errors)
+            // --- Обработка любых ошибок ---
+            console.error("[UserStore:initiatePayment] Error caught:", error); // <<< ЛОГ ОШИБКИ
+            let alertMessage = `Ошибка: ${error.message || 'Неизвестная ошибка'}`;
             if (error instanceof TypeError && error.message.toLowerCase().includes('failed to fetch')) {
-                 alertMessage = 'Сетевая ошибка: Не удалось связаться с сервером платежей. Проверьте интернет-соединение.';
+                 alertMessage = 'Сетевая ошибка: Не удалось связаться с сервером. Проверьте интернет-соединение.';
             }
-            alert(alertMessage);
+            alert(alertMessage); // Показываем ошибку пользователю
 
-            if (tg?.MainButton) { // Включаем кнопку при любой ошибке
+            if (tg?.MainButton) { // Включаем кнопку
                  tg.MainButton.hideProgress();
                  tg.MainButton.enable();
+                 console.log("[UserStore:initiatePayment] MainButton re-enabled after error.");
             }
         }
-    } // <--- Конец initiatePayment
-  } // <--- Конец actions
-}); // <--- Конец defineStore
+    } // --- Конец initiatePayment ---
+  } // --- Конец actions ---
+}); // --- Конец defineStore ---
