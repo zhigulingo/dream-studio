@@ -2,15 +2,13 @@
 const { Api, GrammyError } = require('grammy'); // Используем Api из grammy
 const crypto = require('crypto');
 
+// --- Переменные окружения ---
 const BOT_TOKEN = process.env.BOT_TOKEN;
-const TMA_ORIGIN = process.env.TMA_URL;
-// Нужен токен провайдера платежей Telegram (получается у @BotFather при подключении провайдера)
-// Если используете Telegram Stars, токен не нужен, но API может требовать заглушку.
-// Для Stars ВАЖНА валюта "XTR" и provider_token можно не указывать или использовать фиктивный.
-const PAYMENT_PROVIDER_TOKEN = process.env.PAYMENT_PROVIDER_TOKEN || "dummy_token_for_stars"; // Замените, если используете другого провайдера
+const TMA_ORIGIN = process.env.TMA_URL; // URL вашего TMA для CORS
 
 // --- Функция валидации Telegram InitData ---
-function validateTelegramData(initData, botToken) { /* ... (код функции) ... */
+// (Скопируйте ее из user-profile.js или analyses-history.js)
+function validateTelegramData(initData, botToken) {
     if (!initData || !botToken) return { valid: false, data: null };
     const params = new URLSearchParams(initData);
     const hash = params.get('hash');
@@ -28,26 +26,30 @@ function validateTelegramData(initData, botToken) { /* ... (код функци�
             if (!userData) return { valid: false, data: null };
             return { valid: true, data: JSON.parse(decodeURIComponent(userData)) };
         } else {
-            console.warn("Telegram InitData validation failed: hash mismatch.");
+            console.warn("[create-invoice] Telegram InitData validation failed: hash mismatch.");
             return { valid: false, data: null };
         }
     } catch (error) {
-        console.error("Error during Telegram InitData validation:", error);
+        console.error("[create-invoice] Error during Telegram InitData validation:", error);
         return { valid: false, data: null };
     }
 }
 
-
-// --- Заголовки CORS ---
+// --- Заголовки CORS (Разрешаем POST с вашего TMA) ---
 const generateCorsHeaders = (allowedOrigin) => {
-    // Возвращаем к использованию TMA_ORIGIN для безопасности
-    const originToAllow = allowedOrigin || '*'; // Можно оставить '*' если TMA_URL не задан
-    console.log(`CORS: Allowing origin: ${originToAllow}`);
+    // Используем TMA_URL для безопасности
+    const originToAllow = allowedOrigin; // Не используем '*', если TMA_URL задан
+    console.log(`[create-invoice] CORS: Checking origin. Allowed: ${originToAllow || 'Not Set!'}`);
+    // Если TMA_URL не задан в переменных окружения, CORS не сработает!
+    if (!originToAllow) {
+         console.error("[create-invoice] FATAL: TMA_URL environment variable is not set. CORS will fail.");
+         // Можно вернуть заголовки с ошибкой или пустые, но лучше исправить переменные.
+    }
     return {
-        'Access-Control-Allow-Origin': originToAllow,
+        // В продакшене строго указывайте ваш TMA_URL
+        'Access-Control-Allow-Origin': originToAllow || '*', // Ставим * только если TMA_URL не задан (для ОТЛАДКИ)
         'Access-Control-Allow-Headers': 'Content-Type, X-Telegram-Init-Data',
-         // Теперь нужен POST
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS', // Разрешаем POST
     };
 };
 
@@ -61,21 +63,19 @@ exports.handler = async (event) => {
 
     // --- Ожидаем POST запрос ---
     if (event.httpMethod !== 'POST') {
-        return {
-            statusCode: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ error: 'Method Not Allowed' }) };
+        return { statusCode: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
 
     // --- Валидация InitData ---
     const initData = event.headers['x-telegram-init-data'];
-    if (!initData) { /* ... обработка ошибки 401 ... */
+    if (!initData) {
          return { statusCode: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Unauthorized: Missing Telegram InitData' }) };
     }
     const validationResult = validateTelegramData(initData, BOT_TOKEN);
-    if (!validationResult.valid || !validationResult.data?.id) { /* ... обработка ошибки 401 ... */
+    if (!validationResult.valid || !validationResult.data?.id) {
         return { statusCode: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Unauthorized: Invalid Telegram Data' }) };
     }
-    const tgUserId = validationResult.data.id; // Получаем ID пользователя
+    const tgUserId = validationResult.data.id;
 
     // --- Получение данных из тела запроса ---
     let requestBody;
@@ -87,53 +87,52 @@ exports.handler = async (event) => {
 
     const { plan, duration, amount, payload } = requestBody;
 
-    // Простая валидация входных данных
+    // Валидация входных данных
     if (!plan || !duration || !amount || !payload || typeof amount !== 'number' || amount <= 0) {
-         console.error("Invalid request body:", requestBody);
+         console.error(`[create-invoice] Invalid request body for user ${tgUserId}:`, requestBody);
          return { statusCode: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Bad Request: Missing or invalid parameters' }) };
     }
 
     // --- Создание ссылки на инвойс через Telegram Bot API ---
-    if (!BOT_TOKEN) { /* ... обработка ошибки 500 ... */ }
+    if (!BOT_TOKEN) {
+         console.error("[create-invoice] FATAL: BOT_TOKEN is missing!");
+         return { statusCode: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Internal Server Error: Bot configuration missing.' }) };
+    }
 
     try {
-        const api = new Api(BOT_TOKEN); // Создаем экземпляр API grammy
-        console.log(`Creating invoice link: User=${tgUserId}, Plan=${plan}, Duration=${duration}, Amount=${amount} Stars, Payload=${payload}`);
+        const api = new Api(BOT_TOKEN);
+        console.log(`[create-invoice] Creating invoice link: User=${tgUserId}, Plan=${plan}, Duration=${duration}, Amount=${amount} Stars, Payload=${payload}`);
+
+        // --- Параметры для createInvoiceLink ---
+        const title = `Подписка ${plan} (${duration} мес.)`;
+        const description = `Оплата подписки ${plan} на ${duration} месяца в Dream Analyzer`;
+        const currency = 'XTR'; // Валюта Telegram Stars
+        const prices = [{ label: `Подписка ${plan} ${duration} мес.`, amount: amount }]; // amount - это и есть количество звезд
 
         const invoiceLink = await api.raw.createInvoiceLink({
-            title: `Подписка ${plan.toUpperCase()} (${duration} мес.)`,
-            description: `Оплата подписки ${plan} на ${duration} месяца в Dream Analyzer`,
-            payload: payload, // Строка, которую получит бот при успешной оплате
-            // provider_token: PAYMENT_PROVIDER_TOKEN, // Не указываем для Stars или используем фиктивный
-            currency: 'XTR', // Валюта Telegram Stars
-            prices: [
-                // Массив цен - должен быть один элемент для простого платежа
-                { label: `Подписка ${plan} ${duration} мес.`, amount: amount } // amount в минимальных единицах валюты (для Stars это и есть количество звезд)
-            ],
-            // Опциональные параметры:
-            // need_name: true,
-            // need_phone_number: true,
-            // need_email: true,
-            // need_shipping_address: false,
-            // send_phone_number_to_provider: false,
-            // send_email_to_provider: false,
-            // is_flexible: false, // true, если нужна обработка shipping_query
+            title: title,
+            description: description,
+            payload: payload,
+            currency: currency,
+            prices: prices,
+            // provider_token можно не указывать для XTR
         });
 
-        console.log("Invoice link created successfully:", invoiceLink);
+        console.log(`[create-invoice] Invoice link created successfully for user ${tgUserId}:`, invoiceLink);
 
         // Возвращаем ссылку фронтенду
         return {
             statusCode: 200,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ invoiceUrl: invoiceLink }) // Telegram API возвращает просто строку URL
+            body: JSON.stringify({ invoiceUrl: invoiceLink })
         };
 
     } catch (error) {
-        console.error(`Error creating invoice link for user ${tgUserId}:`, error);
+        console.error(`[create-invoice] Error creating invoice link for user ${tgUserId}:`, error);
         let errorMessage = 'Internal Server Error: Failed to create invoice link.';
         if (error instanceof GrammyError) {
             errorMessage = `Telegram API Error: ${error.description} (Code: ${error.error_code})`;
+            // Можно добавить обработку специфических ошибок, например, лимитов
         }
         return {
             statusCode: 500,
