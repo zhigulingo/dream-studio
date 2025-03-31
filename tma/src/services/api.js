@@ -1,8 +1,8 @@
 // tma/src/services/api.js
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
-console.log('Using API Base URL:', API_BASE_URL);
+const API_BASE_URL = 'https://sparkling-cupcake-940504.netlify.app/.netlify/functions';
+console.log('--- USING HARDCODED API Base URL for test ---:', API_BASE_URL);
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
