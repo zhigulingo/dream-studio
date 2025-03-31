@@ -1,15 +1,50 @@
 # netlify.toml (в корне репозитория)
 
 [build]
-  # Если вы деплоите и TMA с этого же сайта, укажите путь к сборке TMA, например:
-  # publish = "tma/dist"
-  # Если сайт ТОЛЬКО для бота, эту секцию можно убрать или оставить publish пустым
+  # Если вы настроили сборку TMA через UI Netlify (Base directory=tma и т.д.),
+  # то здесь настройки build можно не дублировать или оставить пустыми,
+  # если этот netlify.toml относится к обоим сайтам (что менее вероятно).
+  # Если этот netlify.toml только для сайта бота, то секция [build] может быть пустой.
 
 [functions]
-  # Путь к папке, где лежит bot.js
+  # Путь к папке с функциями бота
   directory = "bot/functions/"
-  # Используем бандлер esbuild (обычно лучше справляется с зависимостями)
   node_bundler = "esbuild"
 
-# [[redirects]]
-  # Убедитесь, что эта секция удалена или закомментирована, если не используется
+# --- Правила для добавления CORS заголовков ---
+# Применяются к сайту, где развернуты функции (сайт бота)
+[[headers]]
+  # Применяем ко всем путям внутри директории функций
+  for = "/.netlify/functions/*"
+  [headers.values]
+    # ЗАМЕНИТЕ НА URL ВАШЕГО TMA!
+    Access-Control-Allow-Origin = "https://tourmaline-eclair-9d40ea.netlify.app"
+    # Разрешаем методы
+    Access-Control-Allow-Methods = "GET, POST, OPTIONS"
+    # Разрешаем заголовки
+    Access-Control-Allow-Headers = "Content-Type, X-Telegram-Init-Data"
+    # Разрешаем кеширование preflight
+    Access-Control-Max-Age = "86400"
+
+# --- Правило для обработки OPTIONS (Preflight) ---
+# Это правило также применяется к сайту, где развернуты функции
+[[redirects]]
+  from = "/.netlify/functions/*"
+  # Важно: to должен быть таким же, как from, но с плейсхолдером :splat
+  # для функций это /.netlify/functions/:splat, но т.к. from уже содержит это,
+  # можно попробовать просто /:splat, если Netlify правильно сопоставит.
+  # Либо оставим как есть, Netlify должен быть умным.
+  # Если будут проблемы, можно попробовать to = "/:splat"
+  to = "/.netlify/functions/:splat" # Оставляем стандартный путь
+  status = 204 # No Content - стандартный ответ на OPTIONS preflight
+  force = true # Применять всегда
+  conditions = {Origin = ["https://tourmaline-eclair-9d40ea.netlify.app"], Method = ["OPTIONS"]} # ЗАМЕНИТЕ НА URL ВАШЕГО TMA!
+  # Добавляем заголовки и сюда для ответа на OPTIONS
+  [redirects.headers]
+    Access-Control-Allow-Origin = "https://tourmaline-eclair-9d40ea.netlify.app" # ЗАМЕНИТЕ НА URL ВАШЕГО TMA!
+    Access-Control-Allow-Methods = "GET, POST, OPTIONS"
+    Access-Control-Allow-Headers = "Content-Type, X-Telegram-Init-Data"
+    Access-Control-Max-Age = "86400"
+    # Важно для OPTIONS
+    Content-Length = "0"
+    Vary = "Access-Control-Request-Method, Access-Control-Request-Headers"
