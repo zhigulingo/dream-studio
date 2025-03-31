@@ -4,18 +4,3 @@
   # Путь к папке с функциями бота
   directory = "bot/functions/"
   node_bundler = "esbuild"
-
-# --- Правила для добавления CORS заголовков ---
-# Применяются к сайту, где развернуты функции (сайт бота)
-[[headers]]
-  # Применяем ко всем путям внутри директории функций
-  for = "/.netlify/functions/*"
-  [headers.values]
-    # ЗАМЕНИТЕ НА URL ВАШЕГО TMA!
-    Access-Control-Allow-Origin = "https://tourmaline-eclair-9d40ea.netlify.app"
-    # Явно разрешаем методы и заголовки
-    Access-Control-Allow-Methods = "GET, POST, OPTIONS"
-    Access-Control-Allow-Headers = "Content-Type, X-Telegram-Init-Data"
-    # Access-Control-Max-Age = "86400" # Можно пока убрать
-
-# --- Секция [[redirects]] для OPTIONS УБРАНА ---
