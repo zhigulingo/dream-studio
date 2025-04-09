@@ -63,6 +63,12 @@ const apiMethods = {
     console.log("[api.js] Calling getUserProfile"); // Лог вызова
     return apiClient.get('/user-profile');
   },
+// <<<--- НОВЫЙ МЕТОД ---
+  claimChannelReward() {
+    console.log("[api.js] Calling claimChannelReward"); // Лог вызова
+    // Используем POST, т.к. это действие изменяет состояние
+    return apiClient.post('/claim-channel-token');
+  }
 
   getAnalysesHistory() {
     console.log("[api.js] Calling getAnalysesHistory"); // Лог вызова
