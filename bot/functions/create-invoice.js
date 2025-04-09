@@ -1,15 +1,47 @@
-// bot/functions/create-invoice.js (Обновлено с @tma.js/init-data-node)
+// bot/functions/create-invoice.js (Исправлено: без внешних библиотек, без provider_token для Stars)
 const { Api, GrammyError } = require('grammy');
-const { validate, parse } = require('@tma.js/init-data-node'); // <<<--- ИСПОЛЬЗУЕМ БИБЛИОТЕКУ
+const crypto = require('crypto'); // Используем встроенный crypto
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
-const ALLOWED_TMA_ORIGIN = process.env.ALLOWED_TMA_ORIGIN || 'https://tourmaline-eclair-9d40ea.netlify.app'; // <<<--- ЗАМЕНИТЕ '*' НА ВАШ URL ИЛИ ИСПОЛЬЗУЙТЕ ENV
+// Убедитесь, что эта переменная установлена в Netlify UI для сайта бэкенда!
+const ALLOWED_TMA_ORIGIN = process.env.ALLOWED_TMA_ORIGIN;
+
+// --- ВАША Функция валидации Telegram InitData (без внешних библиотек) ---
+function validateTelegramData(initData, botToken) {
+    // ... (ТОЧНО ТАКАЯ ЖЕ ФУНКЦИЯ, КАК В user-profile.js) ...
+    if (!initData || !botToken) {
+        console.warn("[validateTelegramData] Missing initData or botToken");
+        return { valid: false, data: null, error: "Missing initData or botToken" };
+    }
+    const params = new URLSearchParams(initData);
+    const hash = params.get('hash');
+    if (!hash) {
+        console.warn("[validateTelegramData] Hash is missing in initData");
+        return { valid: false, data: null, error: "Hash is missing" };
+    }
+    params.delete('hash');
+    const dataCheckArr = [];
+    params.sort();
+    params.forEach((value, key) => dataCheckArr.push(`${key}=${value}`));
+    const dataCheckString = dataCheckArr.join('\n');
+    try {
+        const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
+        const checkHash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+        if (checkHash === hash) {
+            const userDataString = params.get('user');
+            if (!userDataString) { return { valid: true, data: null, error: "User data missing" }; }
+            try {
+                const userData = JSON.parse(decodeURIComponent(userDataString));
+                 if (!userData || typeof userData.id === 'undefined') { return { valid: true, data: null, error: "User ID missing in parsed data" }; }
+                return { valid: true, data: userData, error: null };
+            } catch (parseError) { return { valid: true, data: null, error: "Failed to parse user data" }; }
+        } else { return { valid: false, data: null, error: "Hash mismatch" }; }
+    } catch (error) { return { valid: false, data: null, error: "Validation crypto error" }; }
+}
 
 // --- Генерация Заголовков CORS ---
 const generateCorsHeaders = () => {
-    // ВАЖНО: В продакшене используйте конкретный Origin вашего TMA вместо '*'
-    // const originToAllow = '*'; // Для локальной отладки
-    const originToAllow = ALLOWED_TMA_ORIGIN; // Для продакшена
+    const originToAllow = ALLOWED_TMA_ORIGIN || '*'; // Используем переменную или '*' если она не задана
     console.log(`[create-invoice] CORS Headers: Allowing Origin: ${originToAllow}`);
     return {
         'Access-Control-Allow-Origin': originToAllow,
@@ -33,13 +65,13 @@ exports.handler = async (event) => {
         return { statusCode: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
 
-    // --- Проверка конфигурации сервера ---
-    if (!BOT_TOKEN) {
-         console.error("[create-invoice] Server configuration missing (Bot Token)");
-         return { statusCode: 500, headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ error: 'Internal Server Error: Bot configuration missing.' }) };
+   // --- Проверка конфигурации сервера ---
+     if (!BOT_TOKEN || !ALLOWED_TMA_ORIGIN) { // Убрали проверку Supabase, т.к. здесь не используется
+        console.error("[create-invoice] Server configuration missing (Bot Token or Allowed Origin)");
+        return { statusCode: 500, headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ error: 'Internal Server Error: Bot configuration missing.' }) };
      }
 
-    // --- Валидация InitData с использованием библиотеки ---
+    // --- Валидация InitData с использованием ВАШЕЙ функции ---
     const initDataHeader = event.headers['x-telegram-init-data'];
     let verifiedUserId;
 
@@ -48,46 +80,42 @@ exports.handler = async (event) => {
         return { statusCode: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Unauthorized: Missing Telegram InitData' }) };
     }
 
-    try {
-        validate(initDataHeader, BOT_TOKEN, { expiresIn: 3600 });
-        const parsedData = parse(initDataHeader);
-        verifiedUserId = parsedData.user?.id;
-        if (!verifiedUserId) {
-             console.error("[create-invoice] InitData is valid, but user ID is missing.");
-             throw new Error("User ID missing in InitData");
-        }
-        console.log(`[create-invoice] Access validated for user: ${verifiedUserId}`);
-    } catch (error) {
-        console.error("[create-invoice] InitData validation failed:", error.message);
-        return { statusCode: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ error: "Forbidden: Invalid or expired Telegram InitData" }) };
+    const validationResult = validateTelegramData(initDataHeader, BOT_TOKEN);
+
+     if (!validationResult.valid) {
+         console.error(`[create-invoice] InitData validation failed: ${validationResult.error}`);
+         return { statusCode: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ error: `Forbidden: Invalid Telegram InitData (${validationResult.error})` }) };
     }
+    if (!validationResult.data || typeof validationResult.data.id === 'undefined') {
+         console.error(`[create-invoice] InitData is valid, but user data/ID is missing or failed to parse: ${validationResult.error}`);
+         return { statusCode: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ error: `Forbidden: Could not extract user data from InitData (${validationResult.error})` }) };
+    }
+
+    verifiedUserId = validationResult.data.id;
+    console.log(`[create-invoice] Access validated for user: ${verifiedUserId}`);
+
 
     // --- Получение и валидация данных из тела запроса ---
     let requestBody;
     try {
-        // Проверяем наличие тела перед парсингом
-        if (!event.body) {
-             console.error("[create-invoice] Bad Request: Missing request body.");
-             throw new Error('Missing request body');
-        }
+        if (!event.body) throw new Error('Missing request body');
         requestBody = JSON.parse(event.body);
         console.log(`[create-invoice] Parsed request body for user ${verifiedUserId}:`, requestBody);
     } catch (e) {
         console.error(`[create-invoice] Failed to parse JSON body for user ${verifiedUserId}:`, e.message);
-        // Ошибка парсинга или отсутствия тела - это 400 Bad Request
         return { statusCode: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ error: `Bad Request: ${e.message}` }) };
     }
 
     const { plan, duration, amount, payload } = requestBody;
 
-    // Более строгая валидация входных данных
-    if (!plan || typeof plan !== 'string' || !duration || typeof duration !== 'number' || duration <= 0 || !amount || typeof amount !== 'number' || amount <= 0 || !payload || typeof payload !== 'string') {
+    // Валидация: amount для Stars должен быть целым числом >= 1
+    if (!plan || typeof plan !== 'string' || !duration || typeof duration !== 'number' || !Number.isInteger(duration) || duration <= 0 || !amount || typeof amount !== 'number' || !Number.isInteger(amount) || amount < 1 || !payload || typeof payload !== 'string') {
         console.error(`[create-invoice] Invalid request parameters for user ${verifiedUserId}:`, requestBody);
-        return { statusCode: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Bad Request: Missing or invalid parameters (plan, duration, amount, payload)' }) };
+        return { statusCode: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Bad Request: Missing or invalid parameters (plan[string], duration[int>0], amount[int>=1 for Stars], payload[string])' }) };
     }
 
-    // Дополнительная проверка: ID пользователя в payload должен совпадать с проверенным ID
-    const payloadParts = payload.split('_'); // Ожидаемый формат: sub_plan_duration_tgUserId
+    // Проверка совпадения ID в payload и проверенного ID
+    const payloadParts = payload.split('_');
     const payloadUserId = payloadParts.length > 3 ? parseInt(payloadParts[3], 10) : null;
     if (payloadUserId !== verifiedUserId) {
          console.error(`[create-invoice] Security Alert: Payload user ID (${payloadUserId}) does not match validated InitData user ID (${verifiedUserId}). Payload: ${payload}`);
@@ -96,51 +124,46 @@ exports.handler = async (event) => {
     console.log(`[create-invoice] Payload user ID matches validated user ID for ${verifiedUserId}.`);
 
 
-    // --- Создание ссылки на инвойс ---
+    // --- Создание ссылки на инвойс для Telegram Stars ---
     let api;
     try {
         api = new Api(BOT_TOKEN);
 
-        // Формируем данные для инвойса
         const title = `Подписка ${plan.charAt(0).toUpperCase() + plan.slice(1)} (${duration} мес.)`;
-        const description = `Оплата подписки "${plan}" на ${duration} месяца в Dream Analyzer`;
-        const currency = 'XTR'; // Используйте вашу валюту провайдера
-        // Сумма должна быть в минимальных единицах валюты (копейки, центы и т.д.)
-        // Убедитесь, что `amount` передается из фронтенда уже в этих единицах!
-        const prices = [{ label: `Подписка ${plan} ${duration} мес.`, amount: amount }];
+        const description = `Оплата подписки "${plan}" на ${duration} месяца в Dream Analyzer за Telegram Stars`;
+        const currency = 'XTR'; // Для Stars используется XTR
+        // Убедитесь, что amount передается как целое число звезд
+        const prices = [{ label: `Подписка ${plan} ${duration} мес.`, amount: amount }]; // amount в XTR
 
-        console.log(`[create-invoice] Attempting to call api.raw.createInvoiceLink for user ${verifiedUserId} with payload ${payload}...`);
+        console.log(`[create-invoice] Attempting to call api.raw.createInvoiceLink (for Stars) for user ${verifiedUserId} with payload ${payload}...`);
         const invoiceLink = await api.raw.createInvoiceLink({
             title,
             description,
-            payload, // Используем payload, пришедший от клиента (уже проверенный)
-            provider_token: process.env.PAYMENT_PROVIDER_TOKEN, // <<<--- Убедитесь, что эта переменная установлена в Netlify!
-            currency,
+            payload,
+            currency, // XTR
             prices
-            // Можете добавить другие параметры, например: photo_url, need_name, etc.
+            // provider_token НЕ нужен для XTR (Stars)
         });
-        console.log(`[create-invoice] Successfully created invoice link for user ${verifiedUserId}.`);
+        console.log(`[create-invoice] Successfully created invoice link (Stars) for user ${verifiedUserId}.`);
 
         return {
             statusCode: 200,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ invoiceUrl: invoiceLink }) // Возвращаем только URL
+            body: JSON.stringify({ invoiceUrl: invoiceLink })
         };
 
     } catch (error) {
-        console.error(`[create-invoice] Error during createInvoiceLink call for user ${verifiedUserId}:`, error);
+        console.error(`[create-invoice] Error during createInvoiceLink call (Stars) for user ${verifiedUserId}:`, error);
         let errorMessage = 'Internal Server Error: Failed to create invoice link.';
         let statusCode = 500;
 
         if (error instanceof GrammyError) {
             errorMessage = `Telegram API Error: ${error.description} (Code: ${error.error_code})`;
-             // Ошибки 4xx от Telegram обычно означают неверные параметры запроса
             if (error.error_code >= 400 && error.error_code < 500) {
-                 statusCode = 400; // Возвращаем Bad Request клиенту
+                 statusCode = 400;
                  errorMessage = `Bad Request to Telegram API: ${error.description}`;
             }
         } else if (error.message) {
-            // Другие типы ошибок
             errorMessage = error.message;
         }
 
