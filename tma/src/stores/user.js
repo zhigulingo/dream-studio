@@ -122,7 +122,6 @@ export const useUserStore = defineStore('user', {
             alert(alertMessage);
             if (tg?.MainButton) { tg.MainButton.hideProgress(); tg.MainButton.enable(); console.log("[UserStore:initiatePayment] MainButton re-enabled after error."); }
         }
-    } // Конец initiatePayment
     // <<<--- НОВОЕ ДЕЙСТВИЕ ---
     async claimChannelReward() {
         console.log("[UserStore:claimChannelReward] Action started.");
