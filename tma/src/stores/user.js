@@ -1,11 +1,17 @@
-// tma/src/stores/user.js
 import { defineStore } from 'pinia';
-// Импортируем и дефолтный экспорт (методы), и именованный (клиент)
 import api, { apiClient } from '@/services/api';
 
 export const useUserStore = defineStore('user', {
   state: () => ({
-    profile: { tokens: null, subscription_type: 'free', subscription_end: null },
+    // --- ДОБАВЛЕНО: Состояние для получения награды ---
+    isClaimingReward: false,
+    claimRewardError: null,
+    claimRewardSuccessMessage: null,
+    rewardAlreadyClaimed: false, // Флаг, что уже получали (для UI)
+    userCheckedSubscription: false, // Пытался ли пользователь проверить подписку
+    // --- КОНЕЦ ДОБАВЛЕННОГО СОСТОЯНИЯ ---
+
+    profile: { tokens: null, subscription_type: 'free', subscription_end: null, channel_reward_claimed: false }, // <<<--- ДОБАВИЛИ channel_reward_claimed в профиль
     history: [],
     isLoadingProfile: false,
     isLoadingHistory: false,
@@ -17,29 +23,36 @@ export const useUserStore = defineStore('user', {
   }),
 
   getters: {
-    isPremium: (state) => state.profile.subscription_type === 'premium',
-    getPlanDetails: (state) => (plan, duration) => {
-      const prices = { premium: { 1: 1, 3: 1, 12: 1 }, basic: { 1: 1, 3: 1, 12: 1 } }; // Test price = 1
-      const features = { premium: ["Безлимитные токены", "Ранний доступ к фичам", "Без рекламы"], basic: ["30 токенов в месяц", "Стандартный анализ", "Поддержка"], free: ["1 пробный токен"] };
-      return { price: prices[plan]?.[duration] ?? null, features: features[plan] ?? [], durationText: `${duration} Month${duration > 1 ? 's' : ''}` };
+    // --- ДОБАВЛЕНО: Геттер для UI ---
+    canAttemptClaim: (state) => !state.rewardAlreadyClaimed && !state.isClaimingReward,
+    showClaimRewardSection: (state) => {
+       // Показываем секцию, если профиль загружен И награда еще не получена
+       return !state.isLoadingProfile && state.profile && !state.profile.channel_reward_claimed;
     },
-    selectedInvoiceAmount(state) {
-      const details = this.getPlanDetails(state.selectedPlan, state.selectedDuration);
-      return details.price;
-    }
+    // --- КОНЕЦ ДОБАВЛЕННЫХ ГЕТТЕРОВ ---
+
+    isPremium: (state) => state.profile.subscription_type === 'premium',
+    getPlanDetails: (state) => (plan, duration) => { /* ... */ },
+    selectedInvoiceAmount(state) { /* ... */ }
   },
 
   actions: {
     async fetchProfile() {
       this.isLoadingProfile = true; this.errorProfile = null;
+      // --- СБРОС СОСТОЯНИЯ НАГРАДЫ ПРИ ОБНОВЛЕНИИ ПРОФИЛЯ ---
+      this.claimRewardError = null;
+      this.claimRewardSuccessMessage = null;
+      this.userCheckedSubscription = false;
+      // --- КОНЕЦ СБРОСА ---
       try {
-        // Логируем URL перед запросом
         console.log(`[UserStore:fetchProfile] Requesting from Base URL: ${apiClient.defaults.baseURL}`);
-        const response = await api.getUserProfile(); // Используем дефолтный экспорт с методами
+        const response = await api.getUserProfile();
         this.profile = response.data;
+        // --- ДОБАВЛЕНО: Обновляем флаг, если пришел из профиля ---
+        this.rewardAlreadyClaimed = this.profile?.channel_reward_claimed ?? false;
+        // --- КОНЕЦ ДОБАВЛЕННОГО ---
         console.log("[UserStore] Profile loaded:", this.profile);
       } catch (err) {
-        // Ошибка уже логируется перехватчиком Axios в api.js
         this.errorProfile = err.response?.data?.error || err.message || 'Network Error';
       } finally {
         this.isLoadingProfile = false;
@@ -110,5 +123,53 @@ export const useUserStore = defineStore('user', {
             if (tg?.MainButton) { tg.MainButton.hideProgress(); tg.MainButton.enable(); console.log("[UserStore:initiatePayment] MainButton re-enabled after error."); }
         }
     } // Конец initiatePayment
+    // <<<--- НОВОЕ ДЕЙСТВИЕ ---
+    async claimChannelReward() {
+        console.log("[UserStore:claimChannelReward] Action started.");
+        this.isClaimingReward = true;
+        this.claimRewardError = null;
+        this.claimRewardSuccessMessage = null;
+        this.userCheckedSubscription = true; // Пользователь нажал кнопку проверки
+
+        try {
+            console.log(`[UserStore:claimChannelReward] Requesting from Base URL: ${apiClient.defaults.baseURL}`);
+            const response = await api.claimChannelReward(); // Вызываем новый метод API
+            console.log("[UserStore:claimChannelReward] Response received:", response.data);
+
+            const data = response.data;
+            if (data.success) {
+                this.claimRewardSuccessMessage = data.message || "Токен успешно начислен!";
+                this.rewardAlreadyClaimed = true; // Ставим флаг локально
+                // Обновляем токены в профиле, если сервер их вернул
+                if (typeof data.newTokens === 'number') {
+                    this.profile.tokens = data.newTokens;
+                } else {
+                    // Если токены не вернулись, лучше перезапросить профиль для точности
+                    await this.fetchProfile();
+                }
+                 this.profile.channel_reward_claimed = true; // Обновляем и флаг в профиле
+            } else {
+                // Обрабатываем разные причины неудачи
+                if (data.alreadyClaimed) {
+                    this.claimRewardError = data.message || "Награда уже была получена.";
+                    this.rewardAlreadyClaimed = true; // Устанавливаем флаг, если сервер подтвердил
+                     this.profile.channel_reward_claimed = true;
+                } else if (data.subscribed === false) {
+                    this.claimRewardError = data.message || "Пожалуйста, подпишитесь на канал.";
+                    // Не ставим rewardAlreadyClaimed = true, даем попробовать еще раз
+                } else {
+                    // Другая ошибка от бэкенда
+                    this.claimRewardError = data.error || "Не удалось получить награду.";
+                }
+            }
+
+        } catch (err) {
+            console.error("[UserStore:claimChannelReward] Error caught:", err);
+            this.claimRewardError = err.response?.data?.error || err.message || 'Произошла ошибка сети или сервера.';
+        } finally {
+            this.isClaimingReward = false;
+             console.log("[UserStore:claimChannelReward] Action finished.");
+        }
+    }
   } // Конец actions
 }); // Конец defineStore
