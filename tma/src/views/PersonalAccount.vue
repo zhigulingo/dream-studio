@@ -24,7 +24,7 @@
               v-if="userStore.profile.subscription_type !== 'free' || userStore.profile.channel_reward_claimed"
               @click="userStore.openSubscriptionModal"
               class="change-plan-button">
-            Сменить тариф <!-- <<<--- ВОЗВРАЩЕН ВАШ ТЕКСТ -->
+            Сменить тариф <!-- <<<--- ВАШ ТЕКСТ ВОЗВРАЩЕН -->
           </button>
           <!-- Показываем кнопку "Получить первый токен", если тариф бесплатный и награда НЕ получена -->
            <button
@@ -149,24 +149,37 @@ onMounted(async () => {
         tg.ready();
         console.log("[PersonalAccount] Telegram WebApp is ready.");
         tg.BackButton.show();
+        // <<<--- НАЧАЛО ИСПРАВЛЕНИЯ КНОПКИ НАЗАД ---
         tg.BackButton.onClick(() => {
-            if (userStore.showSubscriptionModal) { userStore.closeSubscriptionModal(); }
-            else if (showRewardClaimVievw.value) { goBackToAccount(); }
-            else { tg.close(); }
+            console.log(`[PersonalAccount BackButton] Clicked. Modal open: ${userStore.showSubscriptionModal}, Reward view: ${showRewardClaimView.value}`);
+            if (userStore.showSubscriptionModal) {
+                userStore.closeSubscriptionModal(); // Закрываем модалку
+            } else if (showRewardClaimView.value) { // <<<--- ИСПРАВЛЕНА ОПЕЧАТКА ЗДЕСЬ (было showRewardClaimVievw)
+                goBackToAccount(); // Если на странице награды, возвращаемся в ЛК
+            } else {
+                console.log("[PersonalAccount BackButton] Closing TMA.");
+                tg.close(); // Иначе (в основном ЛК) закрываем приложение
+            }
         });
+        // <<<--- КОНЕЦ ИСПРАВЛЕНИЯ КНОПКИ НАЗАД ---
         if (tg.MainButton.isVisible) { tg.MainButton.hide(); }
     } else { console.warn("[PersonalAccount] Telegram WebApp API not available."); }
 
+    // Загружаем профиль в любом случае (нужен для проверки флага награды)
+    await userStore.fetchProfile();
+    // Историю грузим только если мы в основном ЛК
     if (!showRewardClaimView.value) {
-        await userStore.fetchProfile();
         await userStore.fetchHistory();
-    } else {
-         await userStore.fetchProfile();
     }
 });
 
-const formatDate = (dateString) => { /* ... без изменений ... */ };
+// Форматирование даты (без изменений)
+const formatDate = (dateString) => {
+  if (!dateString) return '';
+  try { return new Date(dateString).toLocaleDateString(); } catch (e) { return dateString; }
+};
 
+// Слежение за получением награды для авто-возврата (без изменений)
 watch(() => userStore.profile.channel_reward_claimed, (newValue, oldValue) => {
   if (newValue === true && oldValue === false && showRewardClaimView.value) {
     console.log("[PersonalAccount] Reward claimed successfully, returning to account view soon.");
@@ -176,7 +189,7 @@ watch(() => userStore.profile.channel_reward_claimed, (newValue, oldValue) => {
 </script>
 
 <style scoped>
-/* --- Стили без изменений, как в вашем последнем коде --- */
+/* --- Стили без изменений --- */
 /* ... (все ваши стили) ... */
 .personal-account { padding: 15px; color: var(--tg-theme-text-color); background-color: var(--tg-theme-bg-color); min-height: 100vh; }
 .card { background-color: var(--tg-theme-secondary-bg-color); border-radius: 8px; padding: 15px; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
@@ -186,31 +199,18 @@ h2 { font-size: 1.2em; }
 p { margin-bottom: 10px; line-height: 1.5; }
 strong { font-weight: 600; }
 .capitalize { text-transform: capitalize; }
-button, a.subscribe-button { /* Объединил стили для кнопок и ссылки-кнопки */
-    display: inline-block;
-    padding: 10px 15px;
-    border-radius: 6px;
-    text-decoration: none;
-    font-weight: bold;
-    cursor: pointer;
-    border: none;
-    text-align: center;
-    margin-top: 5px;
-    width: auto;
-    transition: background-color 0.2s ease, opacity 0.2s ease;
-    font-size: 1em;
-}
+button, a.subscribe-button { display: inline-block; padding: 10px 15px; border-radius: 6px; text-decoration: none; font-weight: bold; cursor: pointer; border: none; text-align: center; margin-top: 5px; width: auto; transition: background-color 0.2s ease, opacity 0.2s ease; font-size: 1em; }
 button:disabled { background-color: #cccccc !important; color: #666666 !important; cursor: not-allowed; opacity: 0.7; }
 button:hover:not(:disabled), a.subscribe-button:hover { opacity: 0.9; }
 .error-message { color: var(--tg-theme-destructive-text-color); background-color: rgba(220, 53, 69, 0.1); border: 1px solid rgba(220, 53, 69, 0.2); padding: 10px; border-radius: 4px; margin-top: 10px; }
 .success-message { color: #28a745; font-weight: bold; margin-top: 15px; }
 .info-message { color: var(--tg-theme-hint-color); font-size: 0.9em; margin-top: 10px; }
 .hint { color: var(--tg-theme-hint-color); font-size: 0.85em; display: block; margin-top: 3px; }
-.user-info { /* Стили для блока профиля */ }
+.user-info { /* ... */ }
 .change-plan-button { background-color: var(--tg-theme-button-color); color: var(--tg-theme-button-text-color); margin-top: 10px; }
 .subscribe-button-main { background-color: var(--tg-theme-link-color); color: white; margin-top: 15px; display: block; width: 100%; }
 .reward-claimed-info p { color: #198754; font-weight: 500; margin-top: 15px; padding: 8px; background-color: rgba(25, 135, 84, 0.1); border-radius: 4px; text-align: center; }
-.history { /* Стили для блока истории */ }
+.history { /* ... */ }
 .reward-claim-view { text-align: center; }
 .reward-claim-view h1 { font-size: 1.4em; margin-bottom: 15px; }
 .reward-claim-view p { text-align: left; margin-bottom: 20px; }
