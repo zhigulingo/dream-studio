@@ -126,13 +126,31 @@ exports.handler = async (event) => {
         const userId = ctx.from?.id;
         if (!userId) { console.warn("[Bot:Handler /start] No user ID."); return; }
         console.log(`[Bot:Handler /start] User ${userId}`);
+
+        // --- ИЗМЕНЕНО: Только создаем пользователя, токен НЕ начисляем ---
         try {
-            await getOrCreateUser(supabaseAdmin, userId);
-            await ctx.reply("Добро пожаловать! Опишите сон для анализа (1 бесплатный) или откройте ЛК.", {
-                reply_markup: TMA_URL ? { inline_keyboard: [[{ text: "Открыть Личный кабинет", web_app: { url: TMA_URL } }]] } : undefined
+            await getOrCreateUser(supabaseAdmin, userId); // Создаем пользователя, если его нет
+            console.log(`[Bot:Handler /start] Ensured user ${userId} exists.`);
+
+            // --- ИЗМЕНЕНО: Отправляем сообщение с кнопкой для ПОЛУЧЕНИЯ токена в TMA ---
+            const welcomeMessage = "Привет! 👋 Это бот, который поможет разгадать тайные смыслы твоих снов.\n\nПолучи свой первый бесплатный токен в приложении и проанализируй сон!";
+            const buttonUrl = `${TMA_URL}?action=claim_reward`; // Добавляем параметр для TMA
+
+            await ctx.reply(welcomeMessage, {
+                reply_markup: {
+                    inline_keyboard: [[{
+                        text: "🎁 Получить токен",
+                        web_app: { url: buttonUrl } // URL ведет в TMA с указанием действия
+                    }]]
+                }
             }).catch(logReplyError);
-             console.log(`[Bot:Handler /start] Welcome sent to ${userId}.`);
-        } catch (e) { console.error("[Bot:Handler /start] Error:", e); await ctx.reply("Ошибка.").catch(logReplyError); }
+
+             console.log(`[Bot:Handler /start] Welcome & 'Get Token' button sent to ${userId}.`);
+
+        } catch (e) {
+            console.error("[Bot:Handler /start] Error ensuring user or sending message:", e);
+            await ctx.reply("Произошла ошибка при запуске. Попробуйте еще раз.").catch(logReplyError);
+        }
     }); // <--- Закрытие bot.command
 
     bot.on("message:text", async (ctx) => {
