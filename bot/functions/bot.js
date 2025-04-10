@@ -40,7 +40,7 @@ try {
         if (!userId) { console.warn("[Bot Handler /start] No user ID."); return; }
         console.log(`[Bot Handler /start] User ${userId}`);
         try {
-            await getOrCreateUser(supabaseAdmin, userId);
+            //await getOrCreateUser(supabaseAdmin, userId);
             console.log(`[Bot Handler /start] Ensured user ${userId} exists.`);
             // Используем MarkdownV2, поэтому нужно экранировать спецсимволы!
             // Но проще использовать HTML-разметку, она надежнее.
