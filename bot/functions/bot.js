@@ -1,9 +1,9 @@
-// bot/functions/bot.js (Исправлено с использованием @grammyjs/platform-netlify)
+// bot/functions/bot.js (Импорт webhookCallback из 'grammy')
 
-const { Bot, Api, GrammyError, HttpError } = require("grammy");
+const { Bot, Api, GrammyError, HttpError, webhookCallback } = require("grammy"); // <<<--- ИЗМЕНЕНО ЗДЕСЬ
 const { createClient } = require("@supabase/supabase-js");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
-const { webhookCallback } = require("@grammyjs/platform-netlify"); // Исправленный импорт адаптера
+// const { webhookCallback } = require("@grammyjs/platform-netlify"); // <<<--- УДАЛЕНО ИЛИ ЗАКОММЕНТИРОВАНО
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const SUPABASE_URL = process.env.SUPABASE_URL;
