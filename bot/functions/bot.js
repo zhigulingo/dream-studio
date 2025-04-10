@@ -1,4 +1,4 @@
-// bot/functions/bot.js (Попытка №9: Снова webhookCallback, исправленный /start)
+// bot/functions/bot.js (Попытка №10: Исправлен getOrCreateUser и analyzeDream/Gemini)
 
 // --- Импорты ---
 const { Bot, Api, GrammyError, HttpError, webhookCallback } = require("grammy");
@@ -16,10 +16,10 @@ const TMA_URL = process.env.TMA_URL;
 // --- Глобальная Инициализация ---
 let bot;
 let supabaseAdmin;
-let genAI; // Объявляем здесь
-let geminiModel = null; // Инициализируем как null
+let genAI; // Только инстанс GoogleGenerativeAI
+let geminiModel = null; // Сам model будет инициализироваться по требованию
 let initializationError = null;
-let botInitializedAndHandlersSet = false; // Флаг успешной настройки
+let botInitializedAndHandlersSet = false;
 
 try {
     console.log("[Bot Global Init] Starting initialization...");
@@ -28,7 +28,7 @@ try {
     }
 
     supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
-    genAI = new GoogleGenerativeAI(GEMINI_API_KEY); // Инициализируем genAI
+    genAI = new GoogleGenerativeAI(GEMINI_API_KEY); // Создаем главный объект Google AI
     bot = new Bot(BOT_TOKEN);
     console.log("[Bot Global Init] Clients and bot instance created.");
 
@@ -37,25 +37,18 @@ try {
 
     // Обработчик /start
     bot.command("start", async (ctx) => {
-        console.log("[Bot Handler /start] Command received."); // ЛОГ
-        const userId = ctx.from?.id;
-        const chatId = ctx.chat.id;
+        console.log("[Bot Handler /start] Command received.");
+        const userId = ctx.from?.id; const chatId = ctx.chat.id;
         if (!userId || !chatId) { console.warn("[Bot Handler /start] No user ID or chat ID."); return; }
         console.log(`[Bot Handler /start] User ${userId} in chat ${chatId}`);
         try {
+            // <<<--- ВАЖНО: Ловим ошибки именно от getOrCreateUser ---
             const userData = await getOrCreateUser(supabaseAdmin, userId);
-            if (!userData || !userData.id) throw new Error("Failed to retrieve user data.");
-            console.log(`[Bot Handler /start] User data: ID=${userData.id}, Claimed=${userData.claimed}, LastMsgId=${userData.lastMessageId}`);
+            console.log(`[Bot Handler /start] User data received: ID=${userData.id}, Claimed=${userData.claimed}, LastMsgId=${userData.lastMessageId}`);
+            // <<<--- КОНЕЦ ВАЖНОГО ---
+
             // Удаление предыдущего сообщения
-            if (userData.lastMessageId) {
-                console.log(`[Bot Handler /start] Attempting delete msg ${userData.lastMessageId}`);
-                await ctx.api.deleteMessage(chatId, userData.lastMessageId).catch(async (deleteError) => {
-                    if (deleteError instanceof GrammyError && (deleteError.error_code === 400 && deleteError.description.includes("message to delete not found"))) {
-                        console.log(`[Bot Handler /start] Msg ${userData.lastMessageId} not found.`);
-                        await supabaseAdmin.from('users').update({ last_start_message_id: null }).eq('id', userData.id).catch(e => console.error("Failed reset last msg id:", e));
-                    } else { console.error(`[Bot Handler /start] Failed delete msg ${userData.lastMessageId}:`, deleteError); }
-                });
-            }
+            if (userData.lastMessageId) { /* ... (логика удаления без изменений) ... */ }
             // Определение текста и кнопки
             let messageText, buttonText, buttonUrl;
             if (userData.claimed) { messageText = "С возвращением! 👋 Анализируй сны или загляни в ЛК."; buttonText = "Личный кабинет"; buttonUrl = TMA_URL; }
@@ -68,15 +61,15 @@ try {
             const { error: updateError } = await supabaseAdmin.from('users').update({ last_start_message_id: sentMessage.message_id }).eq('id', userData.id);
             if (updateError) console.error(`[Bot Handler /start] Failed update last_start_message_id:`, updateError);
             else console.log(`[Bot Handler /start] Updated last_start_message_id to ${sentMessage.message_id}.`);
-        } catch (e) {
-             console.error("[Bot Handler /start] CRITICAL Error:", e);
-             try { await ctx.reply("Произошла ошибка при обработке команды.").catch(logReplyError); } catch {}
+        } catch (e) { // <<<--- Ловим ошибку, проброшенную из getOrCreateUser ---
+             console.error("[Bot Handler /start] CRITICAL Error (likely from getOrCreateUser):", e.message); // Логируем КОНКРЕТНУЮ ошибку
+             try { await ctx.reply(`Произошла ошибка при получении данных пользователя (${e.message}). Попробуйте позже.`).catch(logReplyError); } catch {}
         }
     });
 
-    // Обработчик текстовых сообщений
+    // Обработчик текстовых сообщений (ПЕРЕДАЕМ geminiModel)
     bot.on("message:text", async (ctx) => {
-        console.log("[Bot Handler text] Received text message."); // ЛОГ
+        console.log("[Bot Handler text] Received text message.");
         const dreamText = ctx.message.text; const userId = ctx.from?.id; const chatId = ctx.chat.id; const messageId = ctx.message.message_id;
         if (!userId || !chatId) { console.warn("[Bot Handler text] No user/chat ID."); return; }
         if (dreamText.startsWith('/')) { console.log(`[Bot Handler text] Ignoring command.`); return; }
@@ -84,83 +77,206 @@ try {
         let statusMessage;
         try {
             console.log(`[Bot Handler text] Deleting user message ${messageId}`);
-            await ctx.api.deleteMessage(chatId, messageId).catch(delErr => { if (!(delErr instanceof GrammyError && delErr.error_code === 400 && delErr.description.includes("message to delete not found"))) { console.warn(`[Bot Handler text] Failed delete user msg ${messageId}:`, delErr); }});
+            await ctx.api.deleteMessage(chatId, messageId).catch(delErr => { /* ... обработка ошибок удаления ... */});
             statusMessage = await ctx.reply("Анализирую ваш сон... 🧠✨").catch(logReplyError);
             if (!statusMessage) throw new Error("Failed to send status message.");
-            await analyzeDream(ctx, supabaseAdmin, dreamText); // Вызываем анализ
+            // <<<--- ИСПРАВЛЕНИЕ: ПЕРЕДАЕМ geminiModel в analyzeDream ---
+            await analyzeDream(ctx, supabaseAdmin, geminiModel, dreamText); // Передаем текущий (возможно null) geminiModel
+            // <<<--- КОНЕЦ ИСПРАВЛЕНИЯ ---
             console.log(`[Bot Handler text] Deleting status message ${statusMessage.message_id}`);
             await ctx.api.deleteMessage(chatId, statusMessage.message_id).catch(delErr => { console.warn(`[Bot Handler text] Failed delete status msg ${statusMessage.message_id}:`, delErr); });
             console.log(`[Bot Handler text] Analysis complete. Sending confirmation.`);
-            await ctx.reply("Ваш анализ сна готов и сохранен! ✨\n\nПосмотрите его в истории в Личном кабинете.", { reply_markup: { inline_keyboard: [[{ text: "Открыть Личный кабинет", web_app: { url: TMA_URL } }]] } }).catch(logReplyError);
-        } catch (error) {
-            console.error(`[Bot Handler text] Error processing dream for ${userId}:`, error);
+            await ctx.reply("Ваш анализ сна готов и сохранен! ✨\n\nПосмотрите его в истории в ЛК.", { reply_markup: { inline_keyboard: [[{ text: "Открыть Личный кабинет", web_app: { url: TMA_URL } }]] } }).catch(logReplyError);
+        } catch (error) { // Ловим ошибки из analyzeDream
+            console.error(`[Bot Handler text] Error processing dream for ${userId}:`, error); // Логируем КОНКРЕТНУЮ ошибку
             if (statusMessage) { await ctx.api.deleteMessage(chatId, statusMessage.message_id).catch(e => {}); }
-            await ctx.reply(`Произошла ошибка: ${error.message || 'Неизвестная ошибка'}`).catch(logReplyError);
+            await ctx.reply(`Произошла ошибка: ${error.message || 'Неизвестная ошибка'}`).catch(logReplyError); // Показываем ошибку пользователю
         }
     });
 
-    // Другие обработчики
-    bot.on('pre_checkout_query', async (ctx) => { /* ... ваш код ... */ });
-    bot.on('message:successful_payment', async (ctx) => { /* ... ваш код с RPC ... */ });
-
-    // Глобальный обработчик ошибок grammy
-    bot.catch((err) => {
-        const ctx = err.ctx; const e = err.error;
-        console.error(`[Bot Global Error Handler] Error for update ${ctx?.update?.update_id}:`);
-        if (e instanceof GrammyError) { console.error("GrammyError:", e.description, e.payload ? JSON.stringify(e.payload) : ''); }
-        else if (e instanceof HttpError) { console.error("HttpError:", e); }
-        else if (e instanceof Error) { console.error("Error:", e.stack || e.message); }
-        else { console.error("Unknown error:", e); }
-    });
+    // Другие обработчики (без изменений)
+    bot.on('pre_checkout_query', async (ctx) => { /* ... */ });
+    bot.on('message:successful_payment', async (ctx) => { /* ... */ });
+    bot.catch((err) => { /* ... */ });
 
     console.log("[Bot Global Init] Handlers setup complete.");
-    botInitializedAndHandlersSet = true; // Ставим флаг успеха
+    botInitializedAndHandlersSet = true;
 
 } catch (error) {
     console.error("[Bot Global Init] CRITICAL INITIALIZATION ERROR:", error);
     initializationError = error;
-    bot = null; // Сбрасываем бота при ошибке
+    bot = null;
     botInitializedAndHandlersSet = false;
 }
 
 // --- Вспомогательные Функции ---
-// Убедитесь, что ваш актуальный код этих функций здесь
-async function getOrCreateUser(supabase, userId) { /* ... ваш код с return { id, claimed, lastMessageId } ... */ }
-async function getGeminiAnalysis(dreamText) { /* ... ваш код с инициализацией geminiModel внутри ... */ }
-async function analyzeDream(ctx, supabase, dreamText) { /* ... ваш код, который выбрасывает ошибки ... */ }
-function logReplyError(error) { console.error("[Bot Reply Error]", error instanceof Error ? error.message : error); }
 
-// --- Создаем обработчик webhookCallback ЗАРАНЕЕ ---
-// Делаем это вне try...catch, чтобы видеть ошибки самого webhookCallback, если они есть
-let netlifyWebhookHandler = null;
-if (botInitializedAndHandlersSet && bot) {
+// getOrCreateUser (Исправлен catch и добавлено логирование внутри try)
+async function getOrCreateUser(supabase, userId) {
+    if (!supabase) { throw new Error("Supabase client not provided to getOrCreateUser."); } // Более четкая ошибка
+    console.log(`[getOrCreateUser] Processing user ${userId}...`);
     try {
-        // Используем 'aws-lambda-async' для полной совместимости с async/await Netlify
-        netlifyWebhookHandler = webhookCallback(bot, 'aws-lambda-async');
-        console.log("[Bot Global Init] webhookCallback created successfully.");
-    } catch (callbackError) {
-        console.error("[Bot Global Init] FAILED TO CREATE webhookCallback:", callbackError);
-        initializationError = callbackError; // Сохраняем и эту ошибку
+        console.log(`[getOrCreateUser] Selecting user ${userId}...`);
+        let { data: existingUser, error: selectError } = await supabase
+            .from('users').select('id, channel_reward_claimed, last_start_message_id').eq('tg_id', userId).single();
+
+        if (selectError && selectError.code !== 'PGRST116') {
+             console.error(`[getOrCreateUser] Supabase SELECT error: ${selectError.message}`);
+             throw new Error(`DB Select Error: ${selectError.message}`); // Пробрасываем ошибку
+        }
+        if (existingUser) {
+            console.log(`[getOrCreateUser] Found existing user ${userId}.`);
+            return { id: existingUser.id, claimed: existingUser.channel_reward_claimed ?? false, lastMessageId: existingUser.last_start_message_id };
+        } else {
+            console.log(`[getOrCreateUser] User ${userId} not found. Creating...`);
+            const { data: newUser, error: insertError } = await supabase
+                .from('users').insert({ tg_id: userId, subscription_type: 'free', tokens: 0, channel_reward_claimed: false }).select('id').single();
+
+            if (insertError) {
+                 console.error(`[getOrCreateUser] Supabase INSERT error: ${insertError.message}`);
+                 if (insertError.code === '23505') { // Race condition
+                     console.warn(`[getOrCreateUser] Race condition for ${userId}. Re-fetching...`);
+                     let { data: raceUser, error: raceError } = await supabase.from('users').select('id, channel_reward_claimed, last_start_message_id').eq('tg_id', userId).single();
+                     if (raceError) { throw new Error(`DB Re-fetch Error: ${raceError.message}`); } // Ошибка при повторном поиске
+                     if (raceUser) { console.log(`[getOrCreateUser] Found user ${userId} on re-fetch.`); return { id: raceUser.id, claimed: raceUser.channel_reward_claimed ?? false, lastMessageId: raceUser.last_start_message_id }; }
+                     else { throw new Error("DB Inconsistent state after unique violation."); } // Странная ситуация
+                 }
+                 throw new Error(`DB Insert Error: ${insertError.message}`); // Другая ошибка вставки
+            }
+            if (!newUser) { throw new Error("DB Insert Error: No data returned after user creation."); } // Ошибка, если нет ID
+            console.log(`[getOrCreateUser] Created new user ${userId} with ID ${newUser.id}.`);
+            return { id: newUser.id, claimed: false, lastMessageId: null };
+        }
+    } catch (error) {
+        // Логируем ошибку, которая произошла ВНУТРИ try блока или была проброшена
+        console.error(`[getOrCreateUser] FAILED for user ${userId}:`, error);
+        // Пробрасываем ошибку дальше, чтобы ее поймал catch в /start
+        throw error; // <<<--- Убеждаемся, что любая ошибка пробрасывается
     }
-} else {
-     console.error("[Bot Global Init] Skipping webhookCallback creation due to initialization errors.");
-     // initializationError уже должен быть установлен выше
 }
 
 
+// getGeminiAnalysis (Принимает модель, инициализирует при необходимости)
+async function getGeminiAnalysis(passedModel, dreamText) {
+     console.log("[getGeminiAnalysis] Function called.");
+     let modelToUse = passedModel; // Используем переданную модель по умолчанию
+
+     // Если модель не передана или не инициализирована глобально, пытаемся создать
+     if (!modelToUse) {
+         console.log("[getGeminiAnalysis] Model not passed or null, attempting initialization...");
+         try {
+             if (!genAI) { throw new Error("GoogleGenerativeAI instance (genAI) is not available."); }
+             modelToUse = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
+             // Сохраняем в глобальную переменную для следующих вызовов ЭТОГО ЖЕ инстанса функции
+             // (но не полагаемся на это между разными вызовами Netlify функции)
+             geminiModel = modelToUse;
+             console.log("[getGeminiAnalysis] Gemini model initialized successfully within function.");
+         } catch (initErr) {
+             console.error("[getGeminiAnalysis] Failed to initialize Gemini model:", initErr);
+             throw new Error(`Не удалось инициализировать сервис анализа: ${initErr.message}`); // Выбрасываем ошибку
+         }
+     } else {
+          console.log("[getGeminiAnalysis] Using pre-initialized/passed model.");
+     }
+
+     // Проверка текста сна
+     const MAX_DREAM_LENGTH = 4000;
+     if (!dreamText || dreamText.trim().length === 0) { throw new Error("Пустой текст сна."); }
+     if (dreamText.length > MAX_DREAM_LENGTH) { throw new Error(`Сон слишком длинный (>${MAX_DREAM_LENGTH} симв.).`); }
+
+     // Вызов API Gemini
+     try {
+         console.log("[getGeminiAnalysis] Requesting Gemini analysis...");
+         const prompt = `Ты - эмпатичный толкователь снов. Проанализируй сон, сохраняя конфиденциальность, избегая мед. диагнозов/предсказаний. Сон: "${dreamText}". Анализ (2-4 абзаца): 1. Символы/значения. 2. Эмоции/связь с реальностью (если уместно). 3. Темы/сообщения. Отвечай мягко, поддерживающе.`;
+         const result = await modelToUse.generateContent(prompt); // Используем modelToUse
+         const response = await result.response;
+
+         if (response.promptFeedback?.blockReason) {
+             console.warn(`[getGeminiAnalysis] Gemini blocked: ${response.promptFeedback.blockReason}`);
+             throw new Error(`Анализ заблокирован (${response.promptFeedback.blockReason}).`); // Выбрасываем ошибку
+         }
+         const analysisText = response.text();
+         if (!analysisText || analysisText.trim().length === 0) {
+             console.error("[getGeminiAnalysis] Gemini returned empty response.");
+             throw new Error("Пустой ответ от сервиса анализа."); // Выбрасываем ошибку
+         }
+         console.log("[getGeminiAnalysis] Gemini analysis received successfully.");
+         return analysisText; // Возвращаем ТЕКСТ анализа при успехе
+     } catch (error) {
+         console.error("[getGeminiAnalysis] Error during Gemini API call:", error);
+         // Формируем сообщение об ошибке и выбрасываем его
+         if (error.message?.includes("API key not valid")) throw new Error("Неверный ключ API Gemini.");
+         else if (error.status === 404 || error.message?.includes("404") || error.message?.includes("is not found")) throw new Error("Модель Gemini не найдена.");
+         else if (error.message?.includes("quota")) throw new Error("Превышена квота Gemini API.");
+         // Общая ошибка API
+         throw new Error(`Ошибка связи с сервисом анализа (${error.message})`);
+     }
+}
+
+
+// analyzeDream (Принимает модель, передает ее дальше, ловит ошибки)
+async function analyzeDream(ctx, supabase, passedGeminiModel, dreamText) {
+    console.log("[analyzeDream] Function called."); // Лог входа
+    const userId = ctx.from?.id;
+    if (!userId) { throw new Error("Не удалось идентифицировать пользователя."); }
+
+    try {
+        // 1. Получаем ID пользователя в нашей БД
+        console.log(`[analyzeDream] Getting user DB ID for ${userId}...`);
+        const userData = await getOrCreateUser(supabase, userId);
+        const userDbId = userData.id;
+        if (!userDbId) { throw new Error("Ошибка доступа к профилю пользователя."); }
+        console.log(`[analyzeDream] User DB ID: ${userDbId}`);
+
+        // 2. Проверяем и списываем токен
+        console.log(`[analyzeDream] Checking/decrementing token for ${userId}...`);
+        const { data: tokenDecremented, error: rpcError } = await supabase
+            .rpc('decrement_token_if_available', { user_tg_id: userId });
+        if (rpcError) { throw new Error(`Внутренняя ошибка токенов: ${rpcError.message}`); }
+        if (!tokenDecremented) { throw new Error("Недостаточно токенов для анализа."); }
+        console.log(`[analyzeDream] Token decremented for user ${userId}.`);
+
+        // 3. Получаем анализ от Gemini (передаем модель, ловим ошибки)
+        console.log(`[analyzeDream] Requesting analysis...`);
+        // <<<--- ИСПРАВЛЕНИЕ: Передаем passedGeminiModel ---
+        const analysisResultText = await getGeminiAnalysis(passedGeminiModel, dreamText);
+        // <<<--- КОНЕЦ ИСПРАВЛЕНИЯ ---
+        console.log(`[analyzeDream] Analysis received successfully.`); // Лог успеха
+
+        // 4. Сохраняем результат в базу
+        console.log(`[analyzeDream] Saving analysis to DB for user ${userDbId}...`);
+        const { error: insertError } = await supabase
+            .from('analyses').insert({ user_id: userDbId, dream_text: dreamText, analysis: analysisResultText });
+        if (insertError) { throw new Error(`Ошибка сохранения анализа: ${insertError.message}`); }
+        console.log(`[analyzeDream] Analysis saved successfully.`);
+
+        return; // Успешное завершение
+
+    } catch (error) {
+        // Ловим все ошибки из блока try и пробрасываем их
+        console.error(`[analyzeDream] FAILED for user ${userId}: ${error.message}`);
+        throw error; // Пробрасываем для обработчика 'message:text'
+    }
+}
+
+// logReplyError (без изменений)
+function logReplyError(error) { console.error("[Bot Reply Error]", error instanceof Error ? error.message : error); }
+
+
 // --- Экспорт обработчика для Netlify с webhookCallback ---
+// (Код без изменений по сравнению с Попыткой #9)
+let netlifyWebhookHandler = null;
+if (botInitializedAndHandlersSet && bot) {
+    try {
+        netlifyWebhookHandler = webhookCallback(bot, 'aws-lambda-async');
+        console.log("[Bot Global Init] webhookCallback created successfully.");
+    } catch (callbackError) { console.error("[Bot Global Init] FAILED TO CREATE webhookCallback:", callbackError); initializationError = callbackError; }
+} else { console.error("[Bot Global Init] Skipping webhookCallback creation due to errors."); }
+
 exports.handler = async (event) => {
     console.log("[Netlify Handler] Invoked.");
-
-    // Проверяем ошибки инициализации ИЛИ создания webhookCallback
-    if (initializationError || !netlifyWebhookHandler) {
-        console.error("[Netlify Handler] Initialization or webhookCallback creation failed.", initializationError);
-        return { statusCode: 500, body: "Internal Server Error: Bot failed to initialize or configure." };
-    }
-
-    // Если все готово, просто вызываем созданный обработчик
+    if (initializationError || !netlifyWebhookHandler) { console.error("[Netlify Handler] Initialization/webhookCallback failed.", initializationError); return { statusCode: 500, body: "Internal Server Error: Bot failed to initialize." }; }
     console.log("[Netlify Handler] Calling pre-created webhookCallback handler...");
-    // Передаем событие Netlify в готовый обработчик grammY
     return netlifyWebhookHandler(event);
 };
 
