@@ -7,11 +7,11 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 const crypto = require('crypto');
 
 // --- Переменные Окружения ---
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const TMA_URL = process.env.TMA_URL;
+const BOT_TOKEN = process.env.VITE_BOT_TOKEN;
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
+const SUPABASE_SERVICE_KEY = process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
+const GEMINI_API_KEY = process.env.VITE_GEMINI_API_KEY;
+const TMA_URL = process.env.VITE_TMA_URL;
 
 // --- Глобальная Инициализация ---
 let bot;

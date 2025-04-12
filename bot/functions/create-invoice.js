@@ -1,11 +1,10 @@
 // bot/functions/create-invoice.js (Исправлено: без внешних библиотек, без provider_token для Stars)
 const { Api, GrammyError } = require('grammy');
 const crypto = require('crypto'); // Используем встроенный crypto
-
 const BOT_TOKEN = process.env.BOT_TOKEN;
 // Убедитесь, что эта переменная установлена в Netlify UI для сайта бэкенда!
 const ALLOWED_TMA_ORIGIN = process.env.ALLOWED_TMA_ORIGIN;
-
+console.log("ALLOWED_TMA_ORIGIN:", ALLOWED_TMA_ORIGIN);
 // --- ВАША Функция валидации Telegram InitData (без внешних библиотек) ---
 function validateTelegramData(initData, botToken) {
     // ... (ТОЧНО ТАКАЯ ЖЕ ФУНКЦИЯ, КАК В user-profile.js) ...

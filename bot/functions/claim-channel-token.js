@@ -5,7 +5,7 @@ const crypto = require('crypto');
 
 // --- Переменные Окружения ---
 const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const ALLOWED_TMA_ORIGIN = process.env.ALLOWED_TMA_ORIGIN;
 const TARGET_CHANNEL_ID = process.env.TARGET_CHANNEL_ID || '@TheDreamsHub'; // <<<--- ID/юзернейм вашего канала (лучше через ENV)
@@ -54,7 +54,7 @@ exports.handler = async (event) => {
         return { statusCode: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
     // --- Config Check ---
-    if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY || !BOT_TOKEN || !ALLOWED_TMA_ORIGIN || !TARGET_CHANNEL_ID) {
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !BOT_TOKEN || !ALLOWED_TMA_ORIGIN || !TARGET_CHANNEL_ID) {
         console.error("[claim-channel-token] Server configuration missing.");
         return { statusCode: 500, headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ error: 'Internal Server Error: Configuration missing.' }) };
     }
@@ -73,7 +73,7 @@ exports.handler = async (event) => {
     console.log(`[claim-channel-token] Access validated for user: ${verifiedUserId}`);
 
     // --- Основная логика ---
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
     const api = new Api(BOT_TOKEN);
 
     try {

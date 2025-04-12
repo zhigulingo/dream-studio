@@ -3,7 +3,7 @@ const { createClient } = require("@supabase/supabase-js");
 const crypto = require('crypto'); // Используем встроенный crypto
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const BOT_TOKEN = process.env.BOT_TOKEN;
 // Убедитесь, что эта переменная установлена в Netlify UI для сайта бэкенда!
 const ALLOWED_TMA_ORIGIN = process.env.ALLOWED_TMA_ORIGIN;
@@ -68,7 +68,7 @@ exports.handler = async (event) => {
     }
 
    // --- Проверка конфигурации сервера ---
-     if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY || !BOT_TOKEN || !ALLOWED_TMA_ORIGIN) { // Добавили проверку ALLOWED_TMA_ORIGIN
+     if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !BOT_TOKEN || !ALLOWED_TMA_ORIGIN) { // Добавили проверку ALLOWED_TMA_ORIGIN
         console.error("[analyses-history] Server configuration missing (Supabase URL/Key, Bot Token, or Allowed Origin)");
         return { statusCode: 500, headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ error: 'Internal Server Error: Configuration missing.' }) };
      }
@@ -98,7 +98,7 @@ exports.handler = async (event) => {
 
     // --- Основная логика ---
     try {
-        const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
+        const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
              auth: { autoRefreshToken: false, persistSession: false }
         });
 
